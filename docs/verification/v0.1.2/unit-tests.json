@@ -1,0 +1,27 @@
+{
+  "tests": 52,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "suites": [
+    {
+      "name": "com.moa.calendar.data.CalDavClientTest",
+      "tests": 23
+    },
+    {
+      "name": "com.moa.calendar.data.TaskCodecTest",
+      "tests": 7
+    },
+    {
+      "name": "com.moa.calendar.data.IcsCodecTest",
+      "tests": 14
+    },
+    {
+      "name": "com.moa.calendar.data.AccountSelectionTest",
+      "tests": 8
+    }
+  ],
+  "lint": {
+    "Warning": 31
+  }
+}

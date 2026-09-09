@@ -49,10 +49,11 @@ class CalDavClient(
             if (prop.getElementsByTagNameNS(CAL, "calendar").length == 0) return@mapNotNull null
             val url = safeUrl(home, href)
             val componentSets = prop.getElementsByTagNameNS(CAL, "supported-calendar-component-set")
-            if (componentSets.length > 0) {
+            val supported = if (componentSets.length > 0) {
                 val components = (componentSets.item(0) as Element).getElementsByTagNameNS(CAL, "comp")
-                if ((0 until components.length).none { (components.item(it) as Element).getAttribute("name") == "VEVENT" }) return@mapNotNull null
-            }
+                (0 until components.length).map { (components.item(it) as Element).getAttribute("name").uppercase() }.toSet()
+            } else setOf("VEVENT", "VTODO") // RFC 4791 §5.2.3: absent means all component types.
+            if (supported.none { it == "VEVENT" || it == "VTODO" }) return@mapNotNull null
             val privileges = prop.getElementsByTagNameNS(DAV, "privilege")
             val rights = (0 until privileges.length).flatMap { i ->
                 val nodes = privileges.item(i).childNodes
@@ -60,20 +61,30 @@ class CalDavClient(
             }.toSet()
             val writable = "all" in rights || "write" in rights || rights.containsAll(setOf("write-content", "bind", "unbind"))
             CalendarInfo(url.toString(), prop.text(DAV, "displayname").ifBlank { "네이버 캘린더" },
-                username, CalendarSource.NAVER, 0xFF03A86B.toInt(), writable)
+                username, CalendarSource.NAVER, 0xFF03A86B.toInt(), writable,
+                supportsEvents = "VEVENT" in supported, supportsTasks = "VTODO" in supported)
         }.distinctBy { it.id }
         if (calendars.isEmpty()) throw IOException("연결 가능한 캘린더를 찾지 못했어요. 네이버 Android CalDAV 호환 여부를 확인해 주세요.")
         return calendars
     }
 
     fun fetch(calendar: CalendarInfo, from: Long, to: Long): List<DavResource> {
+        if (!calendar.supportsEvents) return emptyList()
         val format = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
+        return fetchComponent(calendar, """<c:comp-filter name="VEVENT"><c:time-range start="${format.format(Instant.ofEpochMilli(from))}" end="${format.format(Instant.ofEpochMilli(to))}"/></c:comp-filter>""")
+    }
+
+    fun fetchTasks(calendar: CalendarInfo): List<DavResource> {
+        if (!calendar.supportsTasks) return emptyList()
+        // No time range: tasks can be overdue or have no DTSTART/DUE at all.
+        return fetchComponent(calendar, """<c:comp-filter name="VTODO"/>""")
+    }
+
+    private fun fetchComponent(calendar: CalendarInfo, filter: String): List<DavResource> {
         val body = """<?xml version="1.0" encoding="UTF-8"?>
             <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
               <d:prop><d:getetag/><c:calendar-data/></d:prop>
-              <c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">
-                <c:time-range start="${format.format(Instant.ofEpochMilli(from))}" end="${format.format(Instant.ofEpochMilli(to))}"/>
-              </c:comp-filter></c:comp-filter></c:filter>
+              <c:filter><c:comp-filter name="VCALENDAR">$filter</c:comp-filter></c:filter>
             </c:calendar-query>""".trimIndent()
         val url = safeUrl(root, calendar.id)
         val xml = request(url, "REPORT", body, mapOf("Depth" to "1")).first
@@ -124,7 +135,7 @@ class CalDavClient(
     private fun request(url: HttpUrl, method: String, body: String?, headers: Map<String, String>, type: String = "application/xml; charset=utf-8", redirects: Int = 0): Pair<String, String> {
         val builder = Request.Builder().url(url).method(method, body?.toRequestBody(type.toMediaType()))
             .header("Authorization", Credentials.basic(username, password, Charsets.UTF_8))
-            .header("User-Agent", "MoaCalendar/0.1.1 (Android; CalDAV)")
+            .header("User-Agent", "MoaCalendar/0.1.2 (Android; CalDAV)")
         headers.forEach { (key, value) -> builder.header(key, value) }
         http.newCall(builder.build()).execute().use { response ->
             if (response.code in listOf(301, 302, 307, 308)) {

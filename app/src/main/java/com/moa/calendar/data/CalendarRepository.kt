@@ -65,6 +65,7 @@ class CalendarRepository(context: Context) {
                     resources.forEach { (calendar, data) -> data.forEach { IcsCodec.parse(it, calendar, from, to) } }
                     storeRemote(discovered, resources)
                     remoteCalendars = discovered
+                    syncTasks(client, discovered)
                     prefs.edit().putLong("last_sync", System.currentTimeMillis()).remove("last_sync_error").apply()
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -78,8 +79,22 @@ class CalendarRepository(context: Context) {
                 try { readResources(calendar.id).forEach { remoteEvents += IcsCodec.parse(it, calendar, from, to) } }
                 catch (e: Exception) { errors += "${calendar.name}: ${e.message ?: "일정을 읽지 못했어요."}" }
             }
-            CalendarSnapshot(deviceCalendars + remoteCalendars, (deviceEvents + remoteEvents).sortedBy { it.startMillis },
-                prefs.getLong("last_sync", 0), errors, allDeviceCalendars.filter { it.source == CalendarSource.GOOGLE }.map { it.account }.distinct().sorted())
+            val tasks = remoteCalendars.filter { it.supportsTasks }.flatMap { calendar ->
+                runCatching { readTaskResources(calendar.id).flatMap { TaskCodec.parse(it, calendar) } }
+                    .getOrElse { errors += "저장된 할 일을 읽지 못했어요."; emptyList() }
+            }
+            val datedTasks = tasks.mapNotNull { it.asCalendarEvent() }.filter { it.startMillis < to && it.endMillis > from }
+            val taskNotice = when {
+                !naverConnected() -> "네이버 계정을 연결하면 서버가 제공하는 할 일을 확인할 수 있어요."
+                prefs.contains("tasks_error") -> prefs.getString("tasks_error", "").orEmpty() + " 이전에 받은 할 일은 유지합니다."
+                !prefs.getBoolean("tasks_checked", false) -> "할 일 지원 여부를 확인하려면 새로고침해 주세요."
+                remoteCalendars.none { it.supportsTasks } -> "이 계정의 CalDAV 서버가 할 일 목록을 제공하지 않습니다. 네이버 웹의 ‘내 할 일’은 원본에서 확인해 주세요."
+                tasks.isEmpty() -> "CalDAV 서버에서 전달된 할 일이 없어요. 웹의 ‘내 할 일’이 CalDAV에 공개되지 않을 수 있습니다."
+                else -> "네이버에서 받은 할 일 ${tasks.size}개 · 완료와 수정은 원본에서 관리해 주세요."
+            }
+            CalendarSnapshot(deviceCalendars + remoteCalendars, (deviceEvents + remoteEvents + datedTasks).sortedBy { it.startMillis },
+                prefs.getLong("last_sync", 0), errors, allDeviceCalendars.filter { it.source == CalendarSource.GOOGLE }.map { it.account }.distinct().sorted(),
+                tasks, taskNotice, runCatching { device.googleSyncNotice(selectedGoogleAccount()) }.getOrElse { "기기 계정 동기화 상태를 확인할 수 없어요." })
         }
     }
 
@@ -95,6 +110,7 @@ class CalendarRepository(context: Context) {
             resources.forEach { (c, data) -> data.forEach { IcsCodec.parse(it, c, from, to) } }
             vault.save(credentials)
             storeRemote(calendars, resources)
+            syncTasks(client, calendars)
             prefs.edit().putString("naver_account", credentials.username)
                 .putLong("last_sync", System.currentTimeMillis()).remove("last_sync_error").commit()
         }
@@ -103,18 +119,20 @@ class CalendarRepository(context: Context) {
     suspend fun disconnectNaver() = withContext(Dispatchers.IO) {
         lock.withLock {
             vault.clear()
-            prefs.edit().remove("naver_account").remove("remote").remove("last_sync").remove("last_sync_error").commit()
+            prefs.edit().remove("naver_account").remove("remote").remove("last_sync").remove("last_sync_error").remove("remote_tasks").remove("tasks_error").remove("tasks_checked").commit()
         }
     }
 
     suspend fun save(draft: EventDraft, existing: CalendarEvent? = null) = withContext(Dispatchers.IO) {
         lock.withLock {
             validateDraft(draft)
+            require(existing?.task != true) { "할 일 변경은 원본에서 해 주세요." }
             require(existing == null || existing.calendarId == draft.calendarId) { "일정의 원본 캘린더는 변경할 수 없어요." }
             when {
                 draft.calendarId.startsWith("device:") -> device.save(draft, existing)
                 else -> {
                     val calendar = readCalendars().firstOrNull { it.id == draft.calendarId } ?: error("캘린더를 찾지 못했어요.")
+                    require(calendar.supportsEvents) { "할 일 전용 목록에는 일정을 저장할 수 없어요." }
                     require(calendar.writable) { "읽기 전용 캘린더예요." }
                     val credentials = vault.read()
                     val client = CalDavClient(credentials.server, credentials.username, credentials.password)
@@ -131,6 +149,7 @@ class CalendarRepository(context: Context) {
 
     suspend fun delete(event: CalendarEvent) = withContext(Dispatchers.IO) {
         lock.withLock {
+            require(!event.task) { "할 일 변경은 원본에서 해 주세요." }
             require(!event.recurring) { "반복 일정은 원본 캘린더에서 삭제해 주세요." }
             when (event.source) {
                 CalendarSource.GOOGLE, CalendarSource.DEVICE -> device.delete(event)
@@ -145,10 +164,37 @@ class CalendarRepository(context: Context) {
         }
     }
 
+    suspend fun enableGoogleCalendar(id: String) = withContext(Dispatchers.IO) {
+        device.enableGoogleCalendarSync(id, selectedGoogleAccount())
+    }
+
+    suspend fun requestGoogleSync() = withContext(Dispatchers.IO) {
+        val account = selectedGoogleAccount() ?: error("먼저 Google 계정을 선택해 주세요.")
+        device.requestGoogleSync(account)
+    }
+
+    private fun readTaskResources(id: String): List<DavResource> {
+        val array = JSONObject(prefs.getString("remote_tasks", "{}")!!).optJSONArray(id) ?: JSONArray()
+        return (0 until array.length()).map { array.getJSONObject(it).let { o -> DavResource(o.getString("href"), o.optString("etag"), o.getString("ics")) } }
+    }
+
+    private fun syncTasks(client: CalDavClient, calendars: List<CalendarInfo>) {
+        try {
+            val resources = calendars.filter { it.supportsTasks }.associateWith { client.fetchTasks(it) }
+            resources.forEach { (calendar, data) -> data.forEach { TaskCodec.parse(it, calendar) } }
+            val json = JSONObject().apply { resources.forEach { (calendar, data) -> put(calendar.id, resourceJson(data)) } }
+            check(prefs.edit().putString("remote_tasks", json.toString()).putBoolean("tasks_checked", true).remove("tasks_error").commit())
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            prefs.edit().putString("tasks_error", "할 일 조회를 완료하지 못했어요. " + (e.message ?: "서버 지원 여부를 확인해 주세요.")).apply()
+        }
+    }
+
     private fun readCalendars(): List<CalendarInfo> {
         val array = JSONObject(prefs.getString("remote", "{}")!!).optJSONArray("calendars") ?: JSONArray()
         return (0 until array.length()).map { i -> array.getJSONObject(i).let {
-            CalendarInfo(it.getString("id"), it.getString("name"), it.getString("account"), CalendarSource.NAVER, it.getInt("color"), it.optBoolean("writable"))
+            CalendarInfo(it.getString("id"), it.getString("name"), it.getString("account"), CalendarSource.NAVER, it.getInt("color"), it.optBoolean("writable"),
+                supportsEvents = it.optBoolean("events", true), supportsTasks = it.optBoolean("tasks", false))
         } }
     }
     private fun readResources(id: String): List<DavResource> {
@@ -160,7 +206,7 @@ class CalendarRepository(context: Context) {
     }
     private fun storeRemote(calendars: List<CalendarInfo>, resources: Map<CalendarInfo, List<DavResource>>) {
         val json = JSONObject().put("calendars", JSONArray().apply { calendars.forEach {
-            put(JSONObject().put("id", it.id).put("name", it.name).put("account", it.account).put("color", it.color).put("writable", it.writable))
+            put(JSONObject().put("id", it.id).put("name", it.name).put("account", it.account).put("color", it.color).put("writable", it.writable).put("events", it.supportsEvents).put("tasks", it.supportsTasks))
         } }).put("resources", JSONObject().apply { resources.forEach { (calendar, data) -> put(calendar.id, resourceJson(data)) } })
         check(prefs.edit().putString("remote", json.toString()).commit()) { "일정 캐시를 저장하지 못했어요." }
     }

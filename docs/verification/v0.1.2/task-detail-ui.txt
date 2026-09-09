@@ -1,0 +1,9 @@
+TaskNoDateFixture [235,890][769,974] clickable=false
+NAVER · fixture-user [235,1016][512,1053] clickable=false
+Task fixture collection [235,1077][508,1111] clickable=false
+미완료 [235,1135][328,1184] clickable=false
+마감일 없음 [235,1208][398,1257] clickable=false
+No deadline [235,1281][414,1321] clickable=false
+완료·수정·삭제는 네이버에서 관리합니다. [235,1345][713,1385] clickable=false
+네이버 열기 ↗ [434,1487][639,1536] clickable=false
+닫기 [737,1487][799,1536] clickable=false

@@ -29,7 +29,7 @@ import java.time.format.DateTimeFormatter
     snapshot: CalendarSnapshot, naverConnected: Boolean, naverAccount: String, hidden: Set<String>,
     googleAccount: String?, hasCalendarPermission: Boolean,
     onGoogle: () -> Unit, onAccountSettings: () -> Unit, onNaver: () -> Unit, onDisconnect: () -> Unit,
-    onVisibility: (String) -> Unit, onRefresh: () -> Unit,
+    onVisibility: (String) -> Unit, onRefresh: () -> Unit, onGoogleSync: () -> Unit, onEnableCalendar: (String) -> Unit,
 ) {
     var disconnectDialog by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(top = 20.dp, bottom = 30.dp)) {
@@ -39,8 +39,9 @@ import java.time.format.DateTimeFormatter
         AccountCard("G", Color(0xFF4285F4), "Google Calendar",
             googleAccount ?: if (snapshot.googleAccounts.isNotEmpty()) "기기의 Google 계정 ${snapshot.googleAccounts.size}개" else "사용할 Google 계정을 선택하세요",
             if (hasCalendarPermission) "Google 계정 선택 · 변경" else "캘린더 접근 허용 · 계정 선택", onGoogle)
-        if (hasCalendarPermission && snapshot.calendars.none { it.source == CalendarSource.GOOGLE }) {
-            Text("선택한 계정의 캘린더가 아직 기기에 없어요. Google Calendar 앱에서 해당 계정의 동기화를 켜 주세요.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 10.dp))
+        if (hasCalendarPermission) {
+            Text(snapshot.googleSyncNotice, fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 10.dp))
+            TextButton(onClick = onGoogleSync, enabled = googleAccount != null) { Text("선택한 Google 계정에서 다시 가져오기", fontSize = 12.sp) }
         }
         TextButton(onClick = onAccountSettings, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("Google 계정 · 기기 동기화 설정 열기 ↗", fontSize = 11.sp) }
         Spacer(Modifier.height(7.dp))
@@ -50,17 +51,32 @@ import java.time.format.DateTimeFormatter
         if (naverConnected) TextButton(onClick = { disconnectDialog = true }) { Text("네이버 연결 해제", fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
         Spacer(Modifier.height(22.dp))
         Text("표시할 캘린더", fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
-        Surface(shape = RoundedCornerShape(19.dp), color = Color.White) {
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                if (snapshot.calendars.isEmpty()) Text("연결 후 캘린더를 선택할 수 있어요.", Modifier.padding(vertical = 22.dp), color = Muted, fontSize = 12.sp)
-                snapshot.calendars.forEach { calendar ->
-                    Row(Modifier.fillMaxWidth().clickable { onVisibility(calendar.id) }.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(9.dp).clip(CircleShape).background(Color(calendar.color)))
-                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                            Text(calendar.name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Text(calendar.accountLabel() + if (!calendar.writable) " · 읽기 전용" else "", fontSize = 10.sp, color = Muted)
+        val groups = listOf(
+            Triple("Google · ${googleAccount ?: "기기의 모든 Google 계정"}", CalendarSource.GOOGLE, "선택한 Google 계정의 캘린더가 아직 기기에 없어요. 위의 다시 가져오기 또는 기기 동기화 설정을 이용해 주세요."),
+            Triple("NAVER · ${if (naverConnected) naverAccount else "연결 필요"}", CalendarSource.NAVER, "네이버 계정을 연결해 주세요."),
+            Triple("이 기기의 다른 캘린더", CalendarSource.DEVICE, ""),
+        )
+        groups.forEach { (heading, source, emptyMessage) ->
+            val calendars = snapshot.calendars.filter { it.source == source }
+            if (calendars.isNotEmpty() || source != CalendarSource.DEVICE) {
+                Text(heading, fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 14.dp, bottom = 8.dp))
+                Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(19.dp), color = Color.White) {
+                    Column(Modifier.padding(horizontal = 16.dp)) {
+                        if (calendars.isEmpty()) Text(emptyMessage, Modifier.padding(vertical = 18.dp), color = Muted, fontSize = 12.sp)
+                        calendars.forEach { calendar ->
+                            Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(9.dp).clip(CircleShape).background(Color(calendar.color)))
+                                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                    Text(calendar.name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                    Text(calendar.accountLabel() + if (!calendar.writable) " · 읽기 전용" else "", fontSize = 10.sp, color = Muted)
+                                    if (!calendar.syncEnabled) Text("이 캘린더의 기기 동기화가 꺼져 있어요", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                                    if (calendar.supportsTasks && !calendar.supportsEvents) Text("할 일 목록", fontSize = 10.sp, color = Muted)
+                                }
+                                if (!calendar.syncEnabled && source == CalendarSource.GOOGLE) {
+                                    TextButton(onClick = { onEnableCalendar(calendar.id) }) { Text("동기화 켜기", fontSize = 11.sp) }
+                                } else Switch(calendar.id !in hidden, { onVisibility(calendar.id) }, modifier = Modifier.semantics { contentDescription = "${calendar.name} 표시" })
+                            }
                         }
-                        Switch(calendar.id !in hidden, { onVisibility(calendar.id) }, modifier = Modifier.semantics { contentDescription = "${calendar.name} 표시" })
                     }
                 }
             }
@@ -85,7 +101,7 @@ import java.time.format.DateTimeFormatter
         }
         Spacer(Modifier.height(27.dp))
         Text("일정은 선택한 원본 캘린더에 저장됩니다. Google과 네이버 간 자동 복제는 하지 않습니다. 네이버 비밀번호는 기기에 암호화해 보관합니다.", color = Muted, fontSize = 11.sp)
-        Text("MOA  0.1.1  ·  Made for your everyday", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 18.dp))
+        Text("MOA  0.1.2  ·  Made for your everyday", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 18.dp))
     }
     if (disconnectDialog) AlertDialog(onDismissRequest = { disconnectDialog = false }, title = { Text("네이버 연결을 해제할까요?") },
         text = { Text("이 기기의 로그인 정보와 저장된 네이버 일정만 지웁니다. 네이버에 있는 원본 일정은 유지됩니다.") },

@@ -13,3 +13,4 @@ dist/*.apk
 docs/reference.png
 # Reviewed installable build accompanying this source revision.
 !dist/moa-calendar-0.1.1-debug.apk
+!dist/moa-calendar-0.1.2-debug.apk

@@ -66,6 +66,8 @@ import java.util.Locale
     var loading by remember { mutableStateOf(false) }
     var showEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<CalendarEvent?>(null) }
+    var taskView by rememberSaveable { mutableStateOf(false) }
+    var selectedTask by remember { mutableStateOf<CalendarTask?>(null) }
     var showGoogle by remember { mutableStateOf(false) }
     var selectedGoogleAccount by remember { mutableStateOf(repository.selectedGoogleAccount()) }
     var hasCalendarPermission by remember { mutableStateOf(DeviceCalendars(context).hasReadPermission()) }
@@ -81,8 +83,19 @@ import java.util.Locale
     fun select(date: LocalDate) { selectedString = date.toString(); monthString = YearMonth.from(date).toString() }
     fun message(text: String) { scope.launch { snackbar.showSnackbar(text) } }
     fun addEvent() {
-        if (snapshot.calendars.none { it.writable }) { page = 3; message("먼저 일정을 저장할 캘린더를 연결해 주세요.") }
+        if (snapshot.calendars.none { it.writable && it.syncEnabled && it.supportsEvents }) { page = 3; message("먼저 일정을 저장할 캘린더를 연결해 주세요.") }
         else { editing = null; showEditor = true }
+    }
+    fun openEvent(event: CalendarEvent) {
+        if (event.task) selectedTask = snapshot.tasks.firstOrNull { it.id == event.id }
+        else { editing = event; showEditor = true }
+    }
+    fun requestGoogleSync() {
+        scope.launch {
+            try { repository.requestGoogleSync(); message("선택한 계정에 동기화를 요청했어요. 도착하는 일정은 자동 반영됩니다.") }
+            catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; message(e.message ?: "기기 동기화 설정을 확인해 주세요.") }
+            revision++
+        }
     }
     val accountLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val name = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
@@ -91,7 +104,7 @@ import java.util.Locale
             repository.selectGoogleAccount(name); selectedGoogleAccount = name
             snapshot = snapshot.copy(calendars = calendarsForGoogleAccount(snapshot.calendars, name), events = emptyList())
             revision++; showGoogle = false
-            message("Google 계정을 선택했어요. 기기 캘린더 동기화 후 일정이 표시됩니다.")
+            requestGoogleSync()
         }
     }
     val now = LocalDate.now()
@@ -144,7 +157,7 @@ import java.util.Locale
             }
         },
         floatingActionButton = {
-            if (page < 2) ExtendedFloatingActionButton(onClick = ::addEvent, containerColor = Accent, contentColor = Color.White,
+            if (page < 2 && !(page == 1 && taskView)) ExtendedFloatingActionButton(onClick = ::addEvent, containerColor = Accent, contentColor = Color.White,
                 modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "일정 추가" },
                 shape = RoundedCornerShape(20.dp), elevation = FloatingActionButtonDefaults.elevation(3.dp),
                 icon = { LineIcon("plus", Color.White, Modifier.size(18.dp)) }, text = { Text("일정 추가") })
@@ -177,8 +190,15 @@ import java.util.Locale
                         { val next = month.plusMonths(it); select(next.atDay(selected.dayOfMonth.coerceAtMost(next.lengthOfMonth()))) },
                         { select(LocalDate.now()) },
                         { id -> val visible = id in hidden; repository.setVisible(id, visible); hidden = repository.hiddenCalendars(); scope.launch { WidgetUpdater.update(context) } },
-                        { editing = it; showEditor = true }, { page = 3 }, ::addEvent)
-                    1 -> AgendaPage(events, selected, search, { select(it) }, { editing = it; showEditor = true })
+                        ::openEvent, { page = 3 }, ::addEvent)
+                    1 -> Column(Modifier.fillMaxSize()) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(!taskView, { taskView = false }, label = { Text("일정") })
+                            FilterChip(taskView, { taskView = true }, label = { Text("할 일") })
+                        }
+                        if (taskView) TasksPage(snapshot.tasks.filter { it.calendarId !in hidden }, snapshot.calendars, snapshot.taskNotice, search, { selectedTask = it })
+                        else AgendaPage(events, selected, search, { select(it) }, ::openEvent)
+                    }
                     2 -> WidgetPage(events) { agenda ->
                         val manager = AppWidgetManager.getInstance(context)
                         val component = ComponentName(context, if (agenda) AgendaWidget::class.java else MonthWidget::class.java)
@@ -196,7 +216,11 @@ import java.util.Locale
                         }, onNaver = { showNaver = true },
                         onDisconnect = { scope.launch { repository.disconnectNaver(); CalendarSyncJob.schedule(context); revision++ } },
                         onVisibility = { id -> repository.setVisible(id, id in hidden); hidden = repository.hiddenCalendars(); scope.launch { WidgetUpdater.update(context) } },
-                        onRefresh = { revision++ })
+                        onRefresh = { revision++ }, onGoogleSync = ::requestGoogleSync,
+                        onEnableCalendar = { id -> scope.launch {
+                            try { repository.enableGoogleCalendar(id); revision++; requestGoogleSync() }
+                            catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; message(e.message ?: "캘린더 설정을 확인해 주세요.") }
+                        } })
                 }
             }
         }
@@ -207,6 +231,7 @@ import java.util.Locale
             repository.selectGoogleAccount(account); selectedGoogleAccount = account
             snapshot = snapshot.copy(calendars = calendarsForGoogleAccount(snapshot.calendars, account), events = emptyList())
             revision++; showGoogle = false
+            if (account != null) requestGoogleSync()
         },
         onAddAccount = {
             val selectedAccount = selectedGoogleAccount?.let { Account(it, "com.google") }
@@ -216,9 +241,10 @@ import java.util.Locale
                     .onFailure { message("Android 설정 → 계정에서 Google 계정을 추가해 주세요.") }
             }
         })
-    if (showEditor) EventEditor(selected, snapshot.calendars, editing, onDismiss = { showEditor = false },
+    if (showEditor) EventEditor(selected, snapshot.calendars.filter { it.supportsEvents && it.syncEnabled }, editing, onDismiss = { showEditor = false },
         onSave = { draft -> repository.save(draft, editing); showEditor = false; select(Instant.ofEpochMilli(draft.startMillis).atZone(if (draft.allDay) ZoneId.of("UTC") else ZoneId.systemDefault()).toLocalDate()); revision++; message("일정을 저장했어요.") },
         onDelete = { editing?.let { repository.delete(it) }; showEditor = false; revision++; message("일정을 삭제했어요.") })
+    selectedTask?.let { task -> TaskDialog(task, snapshot.calendars.firstOrNull { it.id == task.calendarId }, onDismiss = { selectedTask = null }) }
     if (showNaver) NaverDialog(onDismiss = { showNaver = false }) { username, password ->
         repository.connectNaver(username, password); CalendarSyncJob.schedule(context); showNaver = false; revision++; message("네이버 캘린더가 연결됐어요.")
     }

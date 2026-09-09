@@ -30,4 +30,18 @@ class AccountSelectionTest {
         assertEquals("기기 캘린더", device.accountLabel())
         assertEquals("기기 캘린더 · work@example.test", device.copy(account = googleA.account).accountLabel())
     }
+    @Test fun selectedAccountsUnsyncedCalendarsRemainDiscoverable() {
+        val unsynced = googleB.copy(syncEnabled = false)
+        assertEquals(listOf(unsynced), calendarsForGoogleAccount(listOf(googleA, unsynced), googleB.account))
+    }
+    @Test fun accountMatchingIgnoresCaseButNeverGuessesSpelling() {
+        assertEquals(listOf(googleB), calendarsForGoogleAccount(listOf(googleA, googleB), " PERSONAL@example.test "))
+        assertTrue(calendarsForGoogleAccount(listOf(googleA, googleB), "personal@exampel.test").isEmpty())
+    }
+    @Test fun localCalendarsWithEmailNamesNeverBecomeGoogleCalendars() {
+        val local = device.copy(account = googleA.account, name = "Samsung Calendar")
+        val result = calendarsForGoogleAccount(listOf(googleA, googleB, local), googleB.account)
+        assertEquals(listOf(googleB), result.filter { it.source == CalendarSource.GOOGLE })
+        assertEquals(listOf(local), result.filter { it.source == CalendarSource.DEVICE })
+    }
 }

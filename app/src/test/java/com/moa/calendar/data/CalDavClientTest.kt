@@ -101,6 +101,38 @@ class CalDavClientTest {
         assertEquals("PROPFIND", server.takeRequest().method)
         assertEquals("/principal/u/", server.takeRequest().path)
         assertEquals("1", server.takeRequest().getHeader("Depth"))
+        assertTrue(calendar.supportsEvents)
+        assertTrue(calendar.supportsTasks)
+    }
+    @Test fun `task only calendar is discovered instead of discarded`() {
+        reply(multi("/", ""))
+        reply(multi("/tasks/", "<d:displayname>내 할 일</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name=\"VTODO\"/></c:supported-calendar-component-set>"))
+        val tasks = client().discover().single()
+        assertTrue(tasks.supportsTasks)
+        assertFalse(tasks.supportsEvents)
+        assertTrue(client().fetch(tasks, 0, 86400000).isEmpty())
+        assertEquals(2, server.requestCount)
+    }
+    @Test fun `event only server is not misrepresented as supporting tasks`() {
+        reply(multi("/", ""))
+        reply(multi("/cal/", "<d:resourcetype><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name=\"VEVENT\"/></c:supported-calendar-component-set>"))
+        val cal = client().discover().single()
+        assertTrue(cal.supportsEvents)
+        assertFalse(cal.supportsTasks)
+        assertTrue(client().fetchTasks(cal).isEmpty())
+        assertEquals(2, server.requestCount)
+    }
+    @Test fun `tasks query includes undated and overdue tasks without time range`() {
+        val todo = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:todo\r\nSUMMARY:Undated\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+        reply(multi("/cal/task.ics", "<c:calendar-data><![CDATA[$todo]]></c:calendar-data>"))
+        val tasks = client().fetchTasks(calendar().copy(supportsTasks = true))
+        assertEquals("Undated", TaskCodec.parse(tasks.single(), calendar()).single().title)
+        val request = server.takeRequest()
+        val body = request.body.readUtf8()
+        assertEquals("REPORT", request.method)
+        assertTrue(body.contains("name=\"VTODO\""))
+        assertFalse(body.contains("time-range"))
+        assertFalse(body.contains("name=\"VEVENT\""))
     }
     @Test fun `put new resource is conditional and sends calendar content type`() {
         server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"new\""))

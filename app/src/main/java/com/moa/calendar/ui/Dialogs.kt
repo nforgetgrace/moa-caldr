@@ -55,7 +55,7 @@ import java.time.format.DateTimeFormatter
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
-    val readOnly = existing != null && (existing.recurring || calendars.none { it.id == existing.calendarId && it.writable } ||
+    val readOnly = existing != null && (existing.task || existing.recurring || calendars.none { it.id == existing.calendarId && it.writable } ||
         existing.rawIcs.contains("ATTENDEE", true) || existing.rawIcs.contains("ORGANIZER", true))
 
     fun chooseDate(isStart: Boolean) {

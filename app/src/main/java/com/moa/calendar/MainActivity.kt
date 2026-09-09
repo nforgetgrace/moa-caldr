@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
     }
     private val preferences by lazy { getSharedPreferences("moa_calendar", MODE_PRIVATE) }
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key in setOf("remote", "last_sync", "last_sync_error", "google_account")) revision++
+        if (key in setOf("remote", "last_sync", "last_sync_error", "google_account", "remote_tasks", "tasks_error", "tasks_checked")) revision++
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

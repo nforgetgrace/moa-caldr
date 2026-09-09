@@ -82,3 +82,11 @@
 - Month widget: short titles with source-color backgrounds, size-dependent row count and an overflow count. Date opens that day in the app.
 - Naver connection discloses the fixed SSL/443 server and automatic principal discovery.
 - Sync wording: Google follows the device adapter; Naver checks on resume, every minute while active and approximately every 30 minutes in the background.
+
+## Account and task correction · v0.1.2
+- Settings groups calendars by selected Google account, NAVER, and other device calendars. A local calendar with an email account label is still a device calendar.
+- Disabled Google calendars remain discoverable with an explicit enable action. Account selection requests a device sync; missing adapters and disabled automatic sync have visible explanations.
+- The 일정 page offers 일정 / 할 일 chips. Tasks keep their real deadlines; undated tasks remain undated and completed tasks are optional in the list.
+- Only incomplete tasks with deadlines appear in calendar grids and widgets, prefixed with □. Task detail shows the source account and is read-only, with a link to Naver for changes.
+- Missing CalDAV task support, an empty result and a failed request have distinct notices. Event sync remains usable when task queries fail. Never imply that Naver web tasks or Google Tasks are all available through CalDAV.
+- Verification screenshots use isolated emulator fixtures, which are removed after testing and never shipped as app data.

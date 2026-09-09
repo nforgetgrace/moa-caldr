@@ -1,0 +1,23 @@
+{
+  "workflow": "native-android-visual-check",
+  "iteration": 9,
+  "verdict": "pass",
+  "method": "Manual inspection of actual API 35 emulator screenshots; no pixel comparison",
+  "evidence": [
+    "docs/screenshots/v0.1.2/final-account-groups.png",
+    "docs/screenshots/v0.1.2/final-tasks.png",
+    "docs/screenshots/v0.1.2/task-detail.png",
+    "docs/screenshots/v0.1.2/task-month-widget.png"
+  ],
+  "findings": [
+    "Google and LOCAL account groups distinct",
+    "Completed toggle and undated task labels visible",
+    "Read-only source identity visible",
+    "Dated incomplete tasks visible in month and agenda widgets"
+  ],
+  "limitations": [
+    "Fixtures only; no authenticated Naver tasks or Google cloud fetch",
+    "Samsung device and enlarged font sizes not tested"
+  ],
+  "complete": true
+}

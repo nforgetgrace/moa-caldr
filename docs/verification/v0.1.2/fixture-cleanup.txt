@@ -1,0 +1,6 @@
+Removed only records created for v0.1.2 QA on own emulator-5554.
+
+
+
+Removed QA-only calendar preferences after verifying key allowlist; no credential file accessed.
+No result found.

@@ -1,11 +1,14 @@
 package com.moa.calendar.data
 
 import android.Manifest
+import android.accounts.Account
+import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.CalendarContract
+import android.os.Bundle
 import java.time.ZoneId
 
 class DeviceCalendars(private val context: Context) {
@@ -16,13 +19,14 @@ class DeviceCalendars(private val context: Context) {
     fun calendars(): List<CalendarInfo> {
         if (!hasReadPermission()) return emptyList()
         val result = mutableListOf<CalendarInfo>()
-        resolver.query(CalendarContract.Calendars.CONTENT_URI, arrayOf("_id", "calendar_displayName", "account_name", "account_type", "calendar_color", "calendar_access_level"),
-            "sync_events=1", null, "calendar_displayName ASC")?.use { c ->
+        resolver.query(CalendarContract.Calendars.CONTENT_URI, arrayOf("_id", "calendar_displayName", "account_name", "account_type", "calendar_color", "calendar_access_level", "sync_events"),
+            null, null, "calendar_displayName ASC")?.use { c ->
             while (c.moveToNext()) result += CalendarInfo(
                 "device:${c.getLong(0)}", c.getString(1) ?: "캘린더", c.getString(2).orEmpty(),
                 if (c.getString(3) == "com.google") CalendarSource.GOOGLE else CalendarSource.DEVICE,
                 c.getInt(4).let { if (it == 0) 0xFF4285F4.toInt() else it or 0xFF000000.toInt() },
                 c.getInt(5) >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR && hasWritePermission(),
+                syncEnabled = c.getInt(6) == 1,
             )
         }
         return result
@@ -30,7 +34,7 @@ class DeviceCalendars(private val context: Context) {
 
     fun events(calendars: List<CalendarInfo>, from: Long, to: Long): List<CalendarEvent> {
         if (!hasReadPermission() || calendars.isEmpty()) return emptyList()
-        val byId = calendars.associateBy { it.id }
+        val byId = calendars.filter { it.syncEnabled }.associateBy { it.id }
         val builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
         ContentUris.appendId(builder, from)
         ContentUris.appendId(builder, to)
@@ -48,11 +52,45 @@ class DeviceCalendars(private val context: Context) {
         return result
     }
 
+    fun googleSyncNotice(accountName: String?): String {
+        if (accountName == null) return "사용할 Google 계정을 선택해 주세요."
+        if (!ContentResolver.getSyncAdapterTypes().any { it.accountType == "com.google" && it.authority == CalendarContract.AUTHORITY })
+            return "Google 캘린더 동기화 기능이 기기에 없어요. Google Calendar 앱을 설치하고 선택한 계정으로 열어 주세요."
+        val account = Account(accountName, "com.google")
+        return when {
+            !ContentResolver.getMasterSyncAutomatically() -> "기기의 자동 동기화가 꺼져 있어요. 계정 동기화 설정을 확인해 주세요."
+            !ContentResolver.getSyncAutomatically(account, CalendarContract.AUTHORITY) -> "선택한 Google 계정의 캘린더 자동 동기화가 꺼져 있어요."
+            else -> "선택한 Google 계정의 기기 동기화를 사용합니다."
+        }
+    }
+
+    fun requestGoogleSync(accountName: String) {
+        require(accountName.isNotBlank())
+        check(ContentResolver.getSyncAdapterTypes().any { it.accountType == "com.google" && it.authority == CalendarContract.AUTHORITY }) {
+            "Google Calendar 앱을 설치하고 선택한 계정으로 한 번 열어 주세요."
+        }
+        ContentResolver.requestSync(Account(accountName, "com.google"), CalendarContract.AUTHORITY, Bundle().apply {
+            putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true)
+            putBoolean(ContentResolver.SYNC_EXTRAS_EXPEDITED, true)
+        })
+    }
+
+    fun enableGoogleCalendarSync(id: String, selectedAccount: String?) {
+        check(hasWritePermission()) { "캘린더 쓰기 권한이 필요해요." }
+        val calendar = calendars().firstOrNull { it.id == id } ?: error("캘린더를 찾지 못했어요.")
+        require(calendar.source == CalendarSource.GOOGLE &&
+            (selectedAccount == null || calendar.account.equals(selectedAccount, true))) { "선택한 Google 계정의 캘린더만 변경할 수 있어요." }
+        check(resolver.update(ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id.removePrefix("device:").toLong()),
+            ContentValues().apply { put(CalendarContract.Calendars.SYNC_EVENTS, 1); put(CalendarContract.Calendars.VISIBLE, 1) }, null, null) == 1) {
+            "캘린더 동기화 설정을 바꾸지 못했어요."
+        }
+    }
+
     fun save(draft: EventDraft, existing: CalendarEvent?) {
         validateDraft(draft)
         check(hasWritePermission()) { "캘린더 쓰기 권한이 필요해요." }
         require(existing?.recurring != true) { "반복 일정은 원본 캘린더에서 수정해 주세요." }
-        check(calendars().any { it.id == draft.calendarId && it.writable }) { "이 캘린더에는 일정을 저장할 수 없어요." }
+        check(calendars().any { it.id == draft.calendarId && it.writable && it.syncEnabled }) { "이 캘린더에는 일정을 저장할 수 없어요." }
         val values = ContentValues().apply {
             put(CalendarContract.Events.CALENDAR_ID, draft.calendarId.removePrefix("device:").toLong())
             put(CalendarContract.Events.TITLE, draft.title.trim())
