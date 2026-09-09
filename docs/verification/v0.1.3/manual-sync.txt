@@ -1,0 +1,3 @@
+READY: manual sync retains the event; spinner visibility verified.
+PASS: returning to the app after manual refresh starts a silent refresh.
+PASS: cached calendars/events and widget updates stay available during a held sync lock; confirmed empty cache removes deleted events.

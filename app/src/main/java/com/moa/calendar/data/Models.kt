@@ -6,6 +6,12 @@ import java.time.ZoneId
 
 enum class CalendarSource { GOOGLE, NAVER, DEVICE }
 
+fun CalendarSource.displayColor(original: Int): Int = when (this) {
+    CalendarSource.NAVER -> 0xFFB39DDB.toInt()
+    CalendarSource.GOOGLE -> 0xFF03A86B.toInt()
+    CalendarSource.DEVICE -> original
+}
+
 data class CalendarInfo(
     val id: String,
     val name: String,
@@ -29,6 +35,26 @@ fun CalendarInfo.accountLabel(): String {
 
 fun calendarsForGoogleAccount(calendars: List<CalendarInfo>, account: String?): List<CalendarInfo> =
     calendars.filter { it.source != CalendarSource.GOOGLE || account == null || it.account.equals(account.trim(), ignoreCase = true) }
+
+fun CalendarSnapshot.forGoogleAccount(account: String?): CalendarSnapshot {
+    val selected = calendarsForGoogleAccount(calendars, account)
+    val ids = selected.map { it.id }.toSet()
+    return copy(calendars = selected, events = events.filter { it.calendarId in ids }, tasks = tasks.filter { it.calendarId in ids })
+}
+
+data class CalendarDayPreview(val events: List<CalendarEvent>, val remaining: Int)
+
+fun calendarDayPreview(events: List<CalendarEvent>, availableLines: Int = 4): CalendarDayPreview {
+    val lines = availableLines.coerceIn(0, 4)
+    val count = if (events.size <= minOf(3, lines)) events.size else minOf(3, (lines - 1).coerceAtLeast(0))
+    val sorted = events.sortedWith(compareBy<CalendarEvent> { !it.allDay }.thenBy { it.startMillis })
+    return CalendarDayPreview(sorted.take(count), events.size - count)
+}
+
+fun calendarMonthLineCapacity(weekEventCounts: List<Int>, gridHeight: Int, lineHeight: Int): Int =
+    (4 downTo 0).firstOrNull { lines ->
+        weekEventCounts.sumOf { 22 + it.coerceIn(0, lines) * (lineHeight + 1) } <= gridHeight
+    } ?: 0
 
 data class CalendarTask(
     val id: String, val calendarId: String, val title: String, val description: String,

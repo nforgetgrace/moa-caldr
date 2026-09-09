@@ -61,7 +61,7 @@ class CalDavClient(
             }.toSet()
             val writable = "all" in rights || "write" in rights || rights.containsAll(setOf("write-content", "bind", "unbind"))
             CalendarInfo(url.toString(), prop.text(DAV, "displayname").ifBlank { "네이버 캘린더" },
-                username, CalendarSource.NAVER, 0xFF03A86B.toInt(), writable,
+                username, CalendarSource.NAVER, CalendarSource.NAVER.displayColor(0), writable,
                 supportsEvents = "VEVENT" in supported, supportsTasks = "VTODO" in supported)
         }.distinctBy { it.id }
         if (calendars.isEmpty()) throw IOException("연결 가능한 캘린더를 찾지 못했어요. 네이버 Android CalDAV 호환 여부를 확인해 주세요.")
@@ -135,7 +135,7 @@ class CalDavClient(
     private fun request(url: HttpUrl, method: String, body: String?, headers: Map<String, String>, type: String = "application/xml; charset=utf-8", redirects: Int = 0): Pair<String, String> {
         val builder = Request.Builder().url(url).method(method, body?.toRequestBody(type.toMediaType()))
             .header("Authorization", Credentials.basic(username, password, Charsets.UTF_8))
-            .header("User-Agent", "MoaCalendar/0.1.2 (Android; CalDAV)")
+            .header("User-Agent", "MoaCalendar/0.1.3 (Android; CalDAV)")
         headers.forEach { (key, value) -> builder.header(key, value) }
         http.newCall(builder.build()).execute().use { response ->
             if (response.code in listOf(301, 302, 307, 308)) {

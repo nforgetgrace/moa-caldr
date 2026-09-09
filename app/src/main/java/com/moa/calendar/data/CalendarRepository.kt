@@ -48,54 +48,53 @@ class CalendarRepository(context: Context) {
     }
 
     suspend fun load(from: Long, to: Long, refreshRemote: Boolean = true): CalendarSnapshot = withContext(Dispatchers.IO) {
-        lock.withLock {
-            val errors = mutableListOf<String>()
-            if (!refreshRemote && naverConnected()) prefs.getString("last_sync_error", null)?.let { errors += it }
-            val allDeviceCalendars = runCatching { device.calendars() }.getOrElse { errors += "기기 캘린더를 읽지 못했어요. 권한을 확인해 주세요."; emptyList() }
-            val deviceCalendars = calendarsForGoogleAccount(allDeviceCalendars, selectedGoogleAccount())
-            val deviceEvents = runCatching { device.events(deviceCalendars, from, to) }.getOrElse { errors += "기기 일정을 읽지 못했어요. 권한을 확인해 주세요."; emptyList() }
-            var remoteCalendars = readCalendars()
-            if (naverConnected() && refreshRemote) {
+        if (refreshRemote) lock.withLock {
+            if (naverConnected()) {
                 try {
                     val credentials = vault.read()
                     val client = CalDavClient(credentials.server, credentials.username, credentials.password)
-                    val discovered = client.discover()
-                    val resources = discovered.associateWith { client.fetch(it, from, to) }
-                    // Validate all responses before replacing any successful cache.
+                    val calendars = client.discover()
+                    val resources = calendars.associateWith { client.fetch(it, from, to) }
                     resources.forEach { (calendar, data) -> data.forEach { IcsCodec.parse(it, calendar, from, to) } }
-                    storeRemote(discovered, resources)
-                    remoteCalendars = discovered
-                    syncTasks(client, discovered)
-                    prefs.edit().putLong("last_sync", System.currentTimeMillis()).remove("last_sync_error").apply()
+                    storeRemote(calendars, resources, fetchTasks(client, calendars))
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
-                    val message = (e.message ?: "네이버 연결을 확인해 주세요.") + " 저장된 일정을 표시합니다."
-                    errors += message
-                    prefs.edit().putString("last_sync_error", message).apply()
+                    prefs.edit().putString("last_sync_error", (e.message ?: "네이버 연결을 확인해 주세요.") + " 저장된 일정을 표시합니다.").apply()
                 }
             }
-            val remoteEvents = mutableListOf<CalendarEvent>()
-            for (calendar in remoteCalendars) {
-                try { readResources(calendar.id).forEach { remoteEvents += IcsCodec.parse(it, calendar, from, to) } }
-                catch (e: Exception) { errors += "${calendar.name}: ${e.message ?: "일정을 읽지 못했어요."}" }
-            }
-            val tasks = remoteCalendars.filter { it.supportsTasks }.flatMap { calendar ->
-                runCatching { readTaskResources(calendar.id).flatMap { TaskCodec.parse(it, calendar) } }
-                    .getOrElse { errors += "저장된 할 일을 읽지 못했어요."; emptyList() }
-            }
-            val datedTasks = tasks.mapNotNull { it.asCalendarEvent() }.filter { it.startMillis < to && it.endMillis > from }
-            val taskNotice = when {
-                !naverConnected() -> "네이버 계정을 연결하면 서버가 제공하는 할 일을 확인할 수 있어요."
-                prefs.contains("tasks_error") -> prefs.getString("tasks_error", "").orEmpty() + " 이전에 받은 할 일은 유지합니다."
-                !prefs.getBoolean("tasks_checked", false) -> "할 일 지원 여부를 확인하려면 새로고침해 주세요."
-                remoteCalendars.none { it.supportsTasks } -> "이 계정의 CalDAV 서버가 할 일 목록을 제공하지 않습니다. 네이버 웹의 ‘내 할 일’은 원본에서 확인해 주세요."
-                tasks.isEmpty() -> "CalDAV 서버에서 전달된 할 일이 없어요. 웹의 ‘내 할 일’이 CalDAV에 공개되지 않을 수 있습니다."
-                else -> "네이버에서 받은 할 일 ${tasks.size}개 · 완료와 수정은 원본에서 관리해 주세요."
-            }
-            CalendarSnapshot(deviceCalendars + remoteCalendars, (deviceEvents + remoteEvents + datedTasks).sortedBy { it.startMillis },
-                prefs.getLong("last_sync", 0), errors, allDeviceCalendars.filter { it.source == CalendarSource.GOOGLE }.map { it.account }.distinct().sorted(),
-                tasks, taskNotice, runCatching { device.googleSyncNotice(selectedGoogleAccount()) }.getOrElse { "기기 계정 동기화 상태를 확인할 수 없어요." })
         }
+        // Readers never wait for network I/O. Capture one committed preferences generation.
+        val state = prefs.all
+        val remote = JSONObject(state["remote"] as? String ?: "{}")
+        val remoteTasks = JSONObject(state["remote_tasks"] as? String ?: "{}")
+        val errors = mutableListOf<String>()
+        if (naverConnected()) (state["last_sync_error"] as? String)?.let { errors += it }
+        val account = state["google_account"] as? String
+        val allDeviceCalendars = runCatching { device.calendars() }.getOrElse { errors += "기기 캘린더를 읽지 못했어요. 권한을 확인해 주세요."; emptyList() }
+        val deviceCalendars = calendarsForGoogleAccount(allDeviceCalendars, account)
+        val deviceEvents = runCatching { device.events(deviceCalendars, from, to) }.getOrElse { errors += "기기 일정을 읽지 못했어요. 권한을 확인해 주세요."; emptyList() }
+        val remoteCalendars = readCalendars(remote)
+        val remoteEvents = mutableListOf<CalendarEvent>()
+        for (calendar in remoteCalendars) {
+            try { readResources(calendar.id, remote).forEach { remoteEvents += IcsCodec.parse(it, calendar, from, to) } }
+            catch (e: Exception) { errors += "${calendar.name}: ${e.message ?: "일정을 읽지 못했어요."}" }
+        }
+        val tasks = remoteCalendars.filter { it.supportsTasks }.flatMap { calendar ->
+            runCatching { readTaskResources(calendar.id, remoteTasks).flatMap { TaskCodec.parse(it, calendar) } }
+                .getOrElse { errors += "저장된 할 일을 읽지 못했어요."; emptyList() }
+        }
+        val datedTasks = tasks.mapNotNull { it.asCalendarEvent() }.filter { it.startMillis < to && it.endMillis > from }
+        val taskNotice = when {
+            !naverConnected() -> "네이버 계정을 연결하면 서버가 제공하는 할 일을 확인할 수 있어요."
+            state["tasks_error"] is String -> state["tasks_error"].toString() + " 이전에 받은 할 일은 유지합니다."
+            state["tasks_checked"] != true -> "할 일 지원 여부를 확인하려면 새로고침해 주세요."
+            remoteCalendars.none { it.supportsTasks } -> "이 계정의 CalDAV 서버가 할 일 목록을 제공하지 않습니다. 네이버 웹의 ‘내 할 일’은 원본에서 확인해 주세요."
+            tasks.isEmpty() -> "CalDAV 서버에서 전달된 할 일이 없어요. 웹의 ‘내 할 일’이 CalDAV에 공개되지 않을 수 있습니다."
+            else -> "네이버에서 받은 할 일 ${tasks.size}개 · 완료와 수정은 원본에서 관리해 주세요."
+        }
+        CalendarSnapshot(deviceCalendars + remoteCalendars, (deviceEvents + remoteEvents + datedTasks).sortedBy { it.startMillis },
+            state["last_sync"] as? Long ?: 0, errors, allDeviceCalendars.filter { it.source == CalendarSource.GOOGLE }.map { it.account }.distinct().sorted(),
+            tasks, taskNotice, runCatching { device.googleSyncNotice(account) }.getOrElse { "기기 계정 동기화 상태를 확인할 수 없어요." })
     }
 
     suspend fun connectNaver(username: String, password: String, server: String = "https://caldav.calendar.naver.com/") = withContext(Dispatchers.IO) {
@@ -109,10 +108,7 @@ class CalendarRepository(context: Context) {
             val resources = calendars.associateWith { client.fetch(it, from, to) }
             resources.forEach { (c, data) -> data.forEach { IcsCodec.parse(it, c, from, to) } }
             vault.save(credentials)
-            storeRemote(calendars, resources)
-            syncTasks(client, calendars)
-            prefs.edit().putString("naver_account", credentials.username)
-                .putLong("last_sync", System.currentTimeMillis()).remove("last_sync_error").commit()
+            storeRemote(calendars, resources, fetchTasks(client, calendars), credentials.username)
         }
     }
 
@@ -173,42 +169,52 @@ class CalendarRepository(context: Context) {
         device.requestGoogleSync(account)
     }
 
-    private fun readTaskResources(id: String): List<DavResource> {
-        val array = JSONObject(prefs.getString("remote_tasks", "{}")!!).optJSONArray(id) ?: JSONArray()
+    private fun readTaskResources(id: String, tasks: JSONObject): List<DavResource> {
+        val array = tasks.optJSONArray(id) ?: JSONArray()
         return (0 until array.length()).map { array.getJSONObject(it).let { o -> DavResource(o.getString("href"), o.optString("etag"), o.getString("ics")) } }
     }
 
-    private fun syncTasks(client: CalDavClient, calendars: List<CalendarInfo>) {
-        try {
+    private fun fetchTasks(client: CalDavClient, calendars: List<CalendarInfo>): Result<Map<CalendarInfo, List<DavResource>>> {
+        return try {
             val resources = calendars.filter { it.supportsTasks }.associateWith { client.fetchTasks(it) }
             resources.forEach { (calendar, data) -> data.forEach { TaskCodec.parse(it, calendar) } }
-            val json = JSONObject().apply { resources.forEach { (calendar, data) -> put(calendar.id, resourceJson(data)) } }
-            check(prefs.edit().putString("remote_tasks", json.toString()).putBoolean("tasks_checked", true).remove("tasks_error").commit())
+            Result.success(resources)
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            prefs.edit().putString("tasks_error", "할 일 조회를 완료하지 못했어요. " + (e.message ?: "서버 지원 여부를 확인해 주세요.")).apply()
+            Result.failure(e)
         }
     }
 
-    private fun readCalendars(): List<CalendarInfo> {
-        val array = JSONObject(prefs.getString("remote", "{}")!!).optJSONArray("calendars") ?: JSONArray()
+    private fun readCalendars(remote: JSONObject = JSONObject(prefs.getString("remote", "{}")!!)): List<CalendarInfo> {
+        val array = remote.optJSONArray("calendars") ?: JSONArray()
         return (0 until array.length()).map { i -> array.getJSONObject(i).let {
-            CalendarInfo(it.getString("id"), it.getString("name"), it.getString("account"), CalendarSource.NAVER, it.getInt("color"), it.optBoolean("writable"),
+            CalendarInfo(it.getString("id"), it.getString("name"), it.getString("account"), CalendarSource.NAVER, CalendarSource.NAVER.displayColor(it.getInt("color")), it.optBoolean("writable"),
                 supportsEvents = it.optBoolean("events", true), supportsTasks = it.optBoolean("tasks", false))
         } }
     }
-    private fun readResources(id: String): List<DavResource> {
-        val array = JSONObject(prefs.getString("remote", "{}")!!).optJSONObject("resources")?.optJSONArray(id) ?: JSONArray()
+    private fun readResources(id: String, remote: JSONObject = JSONObject(prefs.getString("remote", "{}")!!)): List<DavResource> {
+        val array = remote.optJSONObject("resources")?.optJSONArray(id) ?: JSONArray()
         return (0 until array.length()).map { array.getJSONObject(it).let { o -> DavResource(o.getString("href"), o.optString("etag"), o.getString("ics")) } }
     }
     private fun resourceJson(resources: List<DavResource>) = JSONArray().apply {
         resources.forEach { put(JSONObject().put("href", it.href).put("etag", it.etag).put("ics", it.ics)) }
     }
-    private fun storeRemote(calendars: List<CalendarInfo>, resources: Map<CalendarInfo, List<DavResource>>) {
+    private fun storeRemote(calendars: List<CalendarInfo>, resources: Map<CalendarInfo, List<DavResource>>,
+        tasks: Result<Map<CalendarInfo, List<DavResource>>>, account: String? = null) {
         val json = JSONObject().put("calendars", JSONArray().apply { calendars.forEach {
             put(JSONObject().put("id", it.id).put("name", it.name).put("account", it.account).put("color", it.color).put("writable", it.writable).put("events", it.supportsEvents).put("tasks", it.supportsTasks))
         } }).put("resources", JSONObject().apply { resources.forEach { (calendar, data) -> put(calendar.id, resourceJson(data)) } })
-        check(prefs.edit().putString("remote", json.toString()).commit()) { "일정 캐시를 저장하지 못했어요." }
+        val editor = prefs.edit().putString("remote", json.toString())
+            .putLong("last_sync", System.currentTimeMillis()).remove("last_sync_error")
+        if (account != null) editor.putString("naver_account", account)
+        tasks.fold(onSuccess = { data ->
+            val taskJson = JSONObject().apply { data.forEach { (calendar, items) -> put(calendar.id, resourceJson(items)) } }
+            editor.putString("remote_tasks", taskJson.toString()).putBoolean("tasks_checked", true).remove("tasks_error")
+        }, onFailure = { error ->
+            editor.putString("tasks_error", "할 일 조회를 완료하지 못했어요. " + (error.message ?: "서버 지원 여부를 확인해 주세요."))
+        })
+        // Publish events, tasks and sync status together, preserving old tasks on task-only failure.
+        check(editor.commit()) { "일정 캐시를 저장하지 못했어요." }
     }
     private fun updateResourceCache(id: String, resources: List<DavResource>) {
         val json = JSONObject(prefs.getString("remote", "{}")!!)

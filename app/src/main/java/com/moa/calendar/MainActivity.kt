@@ -1,6 +1,7 @@
 package com.moa.calendar
 
 import android.content.SharedPreferences
+import android.content.Intent
 import android.database.ContentObserver
 import android.os.Bundle
 import android.os.Handler
@@ -21,6 +22,8 @@ import com.moa.calendar.data.DeviceCalendars
 class MainActivity : ComponentActivity() {
     private var revision by mutableIntStateOf(0)
     private var resumed by mutableStateOf(false)
+    private var widgetDate by mutableStateOf<String?>(null)
+    private var widgetOpenRevision by mutableIntStateOf(0)
     private var observing = false
     private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) { revision++ }
@@ -32,10 +35,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        widgetDate = intent.getStringExtra("date")
         enableEdgeToEdge()
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
         CalendarSyncJob.schedule(this)
-        setContent { MoaTheme { MoaApp(revision, resumed, intent.getStringExtra("date"), ::updateCalendarAccess) } }
+        setContent { MoaTheme { MoaApp(revision, resumed, widgetDate, widgetOpenRevision, ::updateCalendarAccess) } }
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        widgetDate = intent.getStringExtra("date")
+        widgetOpenRevision++
     }
     override fun onResume() {
         super.onResume()

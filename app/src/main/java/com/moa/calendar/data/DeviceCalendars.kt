@@ -24,7 +24,8 @@ class DeviceCalendars(private val context: Context) {
             while (c.moveToNext()) result += CalendarInfo(
                 "device:${c.getLong(0)}", c.getString(1) ?: "캘린더", c.getString(2).orEmpty(),
                 if (c.getString(3) == "com.google") CalendarSource.GOOGLE else CalendarSource.DEVICE,
-                c.getInt(4).let { if (it == 0) 0xFF4285F4.toInt() else it or 0xFF000000.toInt() },
+                if (c.getString(3) == "com.google") CalendarSource.GOOGLE.displayColor(c.getInt(4))
+                else c.getInt(4).let { if (it == 0) 0xFF4285F4.toInt() else it or 0xFF000000.toInt() },
                 c.getInt(5) >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR && hasWritePermission(),
                 syncEnabled = c.getInt(6) == 1,
             )

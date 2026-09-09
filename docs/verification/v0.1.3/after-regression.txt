@@ -1,0 +1,1 @@
+PASS: cached calendars/events remain readable during a held sync lock; confirmed empty cache removes deleted events.

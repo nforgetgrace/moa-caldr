@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -49,7 +51,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-@Composable fun MoaApp(externalRevision: Int, resumed: Boolean, initialDate: String?, onPermissionChanged: () -> Unit) {
+@Composable fun MoaApp(externalRevision: Int, resumed: Boolean, initialDate: String?, widgetOpenRevision: Int, onPermissionChanged: () -> Unit) {
     val context = LocalContext.current
     val repository = remember { CalendarRepository(context) }
     val scope = rememberCoroutineScope()
@@ -64,6 +66,10 @@ import java.util.Locale
     var snapshot by remember { mutableStateOf(CalendarSnapshot()) }
     var hidden by remember { mutableStateOf(repository.hiddenCalendars()) }
     var loading by remember { mutableStateOf(false) }
+    var cacheLoaded by remember { mutableStateOf(false) }
+    var manualRefreshRevision by remember { mutableIntStateOf(-1) }
+    var showManualSpinner by remember { mutableStateOf(false) }
+    var refreshGeneration by remember { mutableIntStateOf(0) }
     var showEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<CalendarEvent?>(null) }
     var taskView by rememberSaveable { mutableStateOf(false) }
@@ -81,7 +87,19 @@ import java.util.Locale
         } else scope.launch { snackbar.showSnackbar("캘린더 권한이 있어야 Google 일정을 함께 볼 수 있어요.") }
     }
     fun select(date: LocalDate) { selectedString = date.toString(); monthString = YearMonth.from(date).toString() }
+    LaunchedEffect(widgetOpenRevision) {
+        // Initial selection comes from rememberSaveable; only a new widget click overrides it.
+        if (widgetOpenRevision == 0) return@LaunchedEffect
+        val date = initialDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return@LaunchedEffect
+        select(date)
+        page = 0
+        showEditor = false
+        selectedTask = null
+        searching = false
+        search = ""
+    }
     fun message(text: String) { scope.launch { snackbar.showSnackbar(text) } }
+    fun refreshManually() { if (!loading) { revision++; manualRefreshRevision = revision } }
     fun addEvent() {
         if (snapshot.calendars.none { it.writable && it.syncEnabled && it.supportsEvents }) { page = 3; message("먼저 일정을 저장할 캘린더를 연결해 주세요.") }
         else { editing = null; showEditor = true }
@@ -94,7 +112,7 @@ import java.util.Locale
         scope.launch {
             try { repository.requestGoogleSync(); message("선택한 계정에 동기화를 요청했어요. 도착하는 일정은 자동 반영됩니다.") }
             catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; message(e.message ?: "기기 동기화 설정을 확인해 주세요.") }
-            revision++
+            revision++; manualRefreshRevision = revision
         }
     }
     val accountLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -102,7 +120,7 @@ import java.util.Locale
         val type = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_TYPE)
         if (result.resultCode == Activity.RESULT_OK && type == "com.google" && !name.isNullOrBlank()) {
             repository.selectGoogleAccount(name); selectedGoogleAccount = name
-            snapshot = snapshot.copy(calendars = calendarsForGoogleAccount(snapshot.calendars, name), events = emptyList())
+            snapshot = snapshot.forGoogleAccount(name)
             revision++; showGoogle = false
             requestGoogleSync()
         }
@@ -113,10 +131,11 @@ import java.util.Locale
     val to = maxOf(month.atEndOfMonth().plusMonths(2), now.plusMonths(3)).atStartOfDay(zone).toInstant().toEpochMilli()
     val naverConnected = repository.naverConnected()
     // Provider/cache notifications only reread local data; they never trigger another network sync.
-    LaunchedEffect(monthString, revision, externalRevision) {
+    LaunchedEffect(monthString, externalRevision) {
         hasCalendarPermission = DeviceCalendars(context).hasReadPermission()
         try {
             snapshot = repository.load(from, to, false)
+            cacheLoaded = true
             WidgetUpdater.update(context)
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -125,17 +144,27 @@ import java.util.Locale
     }
     LaunchedEffect(monthString, revision, resumed) {
         if (!resumed) return@LaunchedEffect
+        val generation = ++refreshGeneration
+        showManualSpinner = manualRefreshRevision == revision
+        manualRefreshRevision = -1
         loading = true
         try {
+            // Show committed local data before starting any remote request.
+            if (!cacheLoaded) {
+                snapshot = repository.load(from, to, false)
+                cacheLoaded = true
+            }
             snapshot = repository.load(from, to, true)
             WidgetUpdater.update(context)
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             message(e.message ?: "일정을 불러오지 못했어요.")
-        } finally { loading = false }
+        } finally {
+            if (generation == refreshGeneration) { loading = false; showManualSpinner = false }
+        }
     }
     LaunchedEffect(resumed, naverConnected) {
-        if (resumed && naverConnected) while (true) { delay(60_000); revision++ }
+        if (resumed && naverConnected) while (true) { delay(60_000); if (!loading) revision++ }
     }
 
     Scaffold(
@@ -172,8 +201,10 @@ import java.util.Locale
                     Spacer(Modifier.width(9.dp))
                     Text("일상을 한곳에", fontSize = 11.sp, color = Muted)
                     Spacer(Modifier.weight(1f))
-                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    else IconButton(onClick = { revision++ }, Modifier.size(44.dp)) { LineIcon("sync", Muted, label = "일정 새로고침") }
+                    if (showManualSpinner) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(18.dp).semantics { contentDescription = "수동 동기화 중" }, strokeWidth = 2.dp)
+                    }
+                    else IconButton(onClick = ::refreshManually, modifier = Modifier.size(44.dp), enabled = !loading) { LineIcon("sync", Muted, label = "일정 새로고침") }
                     IconButton(onClick = { searching = !searching; page = 1 }, Modifier.size(44.dp)) { LineIcon("search", label = "일정 검색") }
                 }
                 if (snapshot.errors.isNotEmpty()) {
@@ -184,7 +215,9 @@ import java.util.Locale
                 if (searching && page == 1) OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
                     placeholder = { Text("제목, 장소, 메모 검색") }, singleLine = true, shape = RoundedCornerShape(16.dp),
                     trailingIcon = { IconButton(onClick = { search = ""; searching = false }) { LineIcon("close", label = "검색 닫기") } })
-                when (page) {
+                if (!cacheLoaded) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("저장된 일정을 불러오는 중이에요", fontSize = 13.sp, color = Muted)
+                } else when (page) {
                     0 -> CalendarPage(month, selected, events, snapshot, hidden, mode,
                         { mode = it; if (it == 2) page = 1 }, ::select,
                         { val next = month.plusMonths(it); select(next.atDay(selected.dayOfMonth.coerceAtMost(next.lengthOfMonth()))) },
@@ -216,7 +249,7 @@ import java.util.Locale
                         }, onNaver = { showNaver = true },
                         onDisconnect = { scope.launch { repository.disconnectNaver(); CalendarSyncJob.schedule(context); revision++ } },
                         onVisibility = { id -> repository.setVisible(id, id in hidden); hidden = repository.hiddenCalendars(); scope.launch { WidgetUpdater.update(context) } },
-                        onRefresh = { revision++ }, onGoogleSync = ::requestGoogleSync,
+                        onRefresh = ::refreshManually, onGoogleSync = ::requestGoogleSync,
                         onEnableCalendar = { id -> scope.launch {
                             try { repository.enableGoogleCalendar(id); revision++; requestGoogleSync() }
                             catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; message(e.message ?: "캘린더 설정을 확인해 주세요.") }
@@ -229,7 +262,7 @@ import java.util.Locale
         onDismiss = { showGoogle = false },
         onSelect = { account ->
             repository.selectGoogleAccount(account); selectedGoogleAccount = account
-            snapshot = snapshot.copy(calendars = calendarsForGoogleAccount(snapshot.calendars, account), events = emptyList())
+            snapshot = snapshot.forGoogleAccount(account)
             revision++; showGoogle = false
             if (account != null) requestGoogleSync()
         },
@@ -264,7 +297,9 @@ import java.util.Locale
     onMode: (Int) -> Unit, onDate: (LocalDate) -> Unit, onMonth: (Long) -> Unit, onToday: () -> Unit,
     onFilter: (String) -> Unit, onEvent: (CalendarEvent) -> Unit, onConnect: () -> Unit, onAdd: () -> Unit,
 ) {
-    LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 96.dp)) {
         item {
             Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 18.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -293,10 +328,10 @@ import java.util.Locale
                 Spacer(Modifier.weight(1f))
                 Text("${snapshot.calendars.size}개 캘린더", fontSize = 11.sp, color = Muted)
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(10.dp))
             Surface(Modifier.padding(horizontal = 14.dp), color = Color.White, shape = RoundedCornerShape(24.dp)) {
-                Column(Modifier.padding(horizontal = 9.dp, vertical = 13.dp)) {
-                    CalendarGrid(month, selected, events, mode == 1, onDate = onDate)
+                Column(Modifier.padding(horizontal = 5.dp, vertical = 8.dp)) {
+                    CalendarGrid(month, selected, events, mode == 1, showTitles = true, onDate = onDate)
                     HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 10.dp), color = LineColor)
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         snapshot.calendars.take(3).forEach { calendar ->
@@ -308,12 +343,15 @@ import java.util.Locale
                         }
                         if (snapshot.calendars.isEmpty()) Text("캘린더를 연결해 일정을 모아 보세요", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
                     }
+                    TextButton(onClick = { scope.launch { listState.animateScrollToItem(1) } }, modifier = Modifier.fillMaxWidth()) {
+                        Text("${selected.monthValue}월 ${selected.dayOfMonth}일 일정 ${events.count { it.occursOn(selected) }}개 보기 ↓", fontSize = 12.sp)
+                    }
                 }
             }
         }
         item {
             val dayEvents = events.filter { it.occursOn(selected) }
-            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 27.dp, bottom = 15.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(selected.format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN)), fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 if (selected == LocalDate.now()) Text("TODAY", Modifier.padding(start = 8.dp).clip(RoundedCornerShape(5.dp)).background(AccentWash).padding(horizontal = 6.dp, vertical = 3.dp), fontSize = 8.sp, color = Accent, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
@@ -322,7 +360,8 @@ import java.util.Locale
             if (dayEvents.isEmpty()) EmptyDay(onAdd)
         }
         items(events.filter { it.occursOn(selected) }.sortedWith(compareBy<CalendarEvent> { !it.allDay }.thenBy { it.startMillis }), key = { it.id }) { event ->
-            EventRow(event, snapshot.calendars.firstOrNull { it.id == event.calendarId }?.name.orEmpty(), onEvent)
+            val calendar = snapshot.calendars.firstOrNull { it.id == event.calendarId }
+            EventRow(event, calendar?.name.orEmpty(), onEvent, calendar?.accountLabel().orEmpty())
         }
         item {
             if (snapshot.calendars.isEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 19.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onConnect).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -335,6 +374,7 @@ import java.util.Locale
 }
 
 @Composable fun CalendarGrid(month: YearMonth, selected: LocalDate, events: List<CalendarEvent>, weekOnly: Boolean = false, showTitles: Boolean = false, onDate: (LocalDate) -> Unit = {}) {
+    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
     val first = month.atDay(1)
     val gridStart = if (weekOnly) selected.minusDays((selected.dayOfWeek.value % 7).toLong()) else first.minusDays((first.dayOfWeek.value % 7).toLong())
     val weeks = if (weekOnly) 1 else (first.dayOfWeek.value % 7 + month.lengthOfMonth() + 6) / 7
@@ -345,6 +385,10 @@ import java.util.Locale
         }
     }
     repeat(weeks) { row ->
+        val titleRows = (0 until 7).maxOf { column ->
+            events.count { it.occursOn(gridStart.plusDays((row * 7 + column).toLong())) }.coerceAtMost(4)
+        }
+        val rowHeight = if (showTitles) maxOf(48f, 32 + 16 * fontScale * titleRows).dp else 48.dp
         Row(Modifier.fillMaxWidth()) {
             repeat(7) { column ->
                 val date = gridStart.plusDays((row * 7 + column).toLong())
@@ -352,20 +396,23 @@ import java.util.Locale
                 val isSelected = date == selected
                 val isToday = date == LocalDate.now()
                 val inMonth = YearMonth.from(date) == month
-                Column(Modifier.weight(1f).height(if (showTitles) 70.dp else 48.dp).clip(RoundedCornerShape(12.dp)).clickable { onDate(date) }
-                    .semantics { contentDescription = "${date.monthValue}월 ${date.dayOfMonth}일, 일정 ${dayEvents.size}개" }, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(if (isSelected) Accent else if (isToday) AccentWash else Color.Transparent), contentAlignment = Alignment.Center) {
+                Column(Modifier.weight(1f).height(rowHeight).clip(RoundedCornerShape(12.dp)).clickable { onDate(date) }
+                    .semantics { contentDescription = "${date.monthValue}월 ${date.dayOfMonth}일, 일정 ${dayEvents.size}개" + dayEvents.joinToString(prefix = if (dayEvents.isEmpty()) "" else ": ") { it.title } }, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(11.dp)).background(if (isSelected) Accent else if (isToday) AccentWash else Color.Transparent), contentAlignment = Alignment.Center) {
                         Text(date.dayOfMonth.toString(), fontSize = 13.sp, fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
                             color = when { isSelected -> Color.White; !inMonth -> Color(0xFFCDD1DC); isToday -> Accent; column == 0 -> Color(0xFFD88585); column == 6 -> Color(0xFF7892C4); else -> Ink })
                     }
                     Spacer(Modifier.height(3.dp))
                     if (showTitles) {
-                        dayEvents.take(2).forEachIndexed { index, event ->
-                            Text((if (index == 1 && dayEvents.size > 2) "+${dayEvents.size - 2} " else "") + event.title,
-                                Modifier.fillMaxWidth().padding(horizontal = 1.dp).background(Color(event.color).copy(alpha = .15f)).padding(horizontal = 2.dp),
-                                fontSize = 8.sp, lineHeight = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Spacer(Modifier.height(2.dp))
+                        val preview = calendarDayPreview(dayEvents)
+                        preview.events.forEach { event ->
+                            Text(event.title.replace('\n', ' '),
+                                Modifier.fillMaxWidth().padding(horizontal = 1.dp).background(Color(event.color).copy(alpha = .20f)).padding(horizontal = 2.dp),
+                                fontSize = 10.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(1.dp))
                         }
+                        if (preview.remaining > 0) Text("+${preview.remaining}", Modifier.fillMaxWidth().padding(horizontal = 3.dp),
+                            fontSize = 10.sp, lineHeight = 14.sp, color = Accent, fontWeight = FontWeight.SemiBold)
                     } else if (inMonth || weekOnly) {
                         dayEvents.take(2).forEach { event ->
                             Box(Modifier.width(24.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color(event.color).copy(alpha = .72f)))
@@ -378,7 +425,7 @@ import java.util.Locale
     }
 }
 
-@Composable fun EventRow(event: CalendarEvent, calendarName: String = "", onEvent: (CalendarEvent) -> Unit) {
+@Composable fun EventRow(event: CalendarEvent, calendarName: String = "", onEvent: (CalendarEvent) -> Unit, accountLabel: String = "") {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp).clip(RoundedCornerShape(17.dp)).background(Color.White)
         .clickable { onEvent(event) }.padding(horizontal = 14.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.width(51.dp)) {
@@ -388,13 +435,14 @@ import java.util.Locale
         Box(Modifier.width(3.dp).height(34.dp).clip(CircleShape).background(Color(event.color)))
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text(event.title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(event.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (event.location.isNotBlank()) LineIcon("pin", Muted, Modifier.size(11.dp))
                 Text(if (event.location.isNotBlank()) " ${event.location}" else if (event.recurring) "반복 일정" else calendarName,
                     fontSize = 10.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            if (accountLabel.isNotBlank()) Text(accountLabel, fontSize = 10.sp, color = Muted, modifier = Modifier.padding(top = 3.dp))
         }
         if (calendarName.isNotBlank()) Text(calendarName.take(5), Modifier.padding(start = 6.dp).clip(RoundedCornerShape(6.dp)).background(Color(event.color).copy(alpha = .10f)).padding(horizontal = 7.dp, vertical = 4.dp), fontSize = 9.sp, color = Color(event.color))
     }

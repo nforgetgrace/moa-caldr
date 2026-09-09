@@ -90,3 +90,13 @@
 - Only incomplete tasks with deadlines appear in calendar grids and widgets, prefixed with □. Task detail shows the source account and is read-only, with a link to Naver for changes.
 - Missing CalDAV task support, an empty result and a failed request have distinct notices. Event sync remains usable when task queries fail. Never imply that Naver web tasks or Google Tasks are all available through CalDAV.
 - Verification screenshots use isolated emulator fixtures, which are removed after testing and never shipped as app data.
+
+## Quiet refresh and readable dates · v0.1.3
+- Read the last committed calendar cache without waiting for the remote write lock. Publish fetched events, tasks and sync status together. Preserve legitimate deletion results; do not retain every empty result forever.
+- Initial cache loading must not pretend the user has zero connected calendars. A manual refresh may show a spinner within the existing 44dp action slot; periodic refresh and returning to the app must remain silent.
+- Widget date clicks reuse an existing recent activity and apply the requested date through onNewIntent, returning from settings/editor to the calendar without dropping the current snapshot. Repeated clicks on the same date are distinct navigation requests.
+- NAVER events and tasks use lavender #B39DDB. Google events use green #03A86B. Apply the mapping when reading older cached metadata too; other device calendars retain their own colors.
+- Month cells in app and widget show at most three short titles followed by a separate +N line. The selected date has an explicit link to the full schedule with time and account labels.
+- Widget side padding is 10dp, top/bottom 8dp; title text is 10sp. Give busy weeks enough room before distributing remaining height. At smaller sizes reduce title capacity while preserving the count.
+- App week rows size to their actual title rows (minimum 48dp), reducing empty space while keeping date targets usable. Full event titles in the selected-day list may wrap.
+- Private supplied screenshots remain outside Git; publish only isolated emulator fixtures as verification evidence.

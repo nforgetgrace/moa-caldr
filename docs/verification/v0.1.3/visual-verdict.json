@@ -1,0 +1,25 @@
+{
+  "iteration": 12,
+  "verdict": "pass",
+  "method": "Manual API 35 emulator screenshot inspection, not pixel comparison",
+  "evidence": [
+    "docs/screenshots/v0.1.3/calendar.png",
+    "docs/screenshots/v0.1.3/day-details.png",
+    "docs/screenshots/v0.1.3/widget.png",
+    "docs/screenshots/v0.1.3/calendar-font130.png",
+    "docs/screenshots/v0.1.3/widget-font130.png",
+    "docs/screenshots/v0.1.3/widget-date-during-sync.png"
+  ],
+  "findings": [
+    "Three titles plus a separate +2 for five items in app and month widget",
+    "Lavender Naver events/tasks and green Google events",
+    "Reduced widget padding and larger title text",
+    "Selected-day full titles, times and source accounts",
+    "100% and 130% font scale have no overlapping day rows; short cell titles ellipsize intentionally",
+    "Recent activity keeps visible events when entered from actual home-widget date during sync"
+  ],
+  "limitations": [
+    "Isolated fixtures only; no authenticated cloud tests or Galaxy hardware"
+  ],
+  "complete": true
+}

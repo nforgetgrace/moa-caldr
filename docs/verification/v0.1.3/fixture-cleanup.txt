@@ -1,0 +1,5 @@
+Cleanup on isolated emulator-5554 only.
+No result found.
+Removed QA-only preferences after verifying the key allowlist; credentials were not read.
+font_scale=1.0
+Success (test APK removed)

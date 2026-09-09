@@ -1,0 +1,1 @@
+24b8b19eac14abec834c3efaeb35268b2bf72dfd1ca2a7bb6700351a469a32e0  dist/moa-calendar-0.1.3-debug.apk

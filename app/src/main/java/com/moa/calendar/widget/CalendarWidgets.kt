@@ -21,6 +21,9 @@ import com.moa.calendar.MainActivity
 import com.moa.calendar.R
 import com.moa.calendar.data.CalendarRepository
 import com.moa.calendar.data.CalendarSnapshot
+import com.moa.calendar.data.calendarDayPreview
+import com.moa.calendar.data.calendarMonthLineCapacity
+import kotlin.math.ceil
 import kotlinx.coroutines.*
 import java.time.LocalDate
 import java.time.YearMonth
@@ -88,8 +91,12 @@ object WidgetUpdater {
             AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT else AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT
         val height = options.getInt(heightKey, 300)
         val fontScale = context.resources.configuration.fontScale.coerceAtLeast(1f)
-        val lineHeight = (13 * fontScale).toInt()
-        val capacity = (((height - 115) / weeks - 22) / lineHeight).coerceIn(0, 4)
+        val lineHeight = ceil(14 * fontScale).toInt()
+        val fixedHeight = 16 + 40 + 20 + ceil(28 * fontScale).toInt() + 8
+        val weekEventCounts = (0 until weeks).map { row ->
+            (0 until 7).maxOf { column -> snapshot.events.count { it.occursOn(start.plusDays((row * 7 + column).toLong())) } }
+        }
+        val capacity = calendarMonthLineCapacity(weekEventCounts, height - fixedHeight, lineHeight)
         repeat(weeks) { row ->
             val week = RemoteViews(context.packageName, R.layout.widget_week)
             repeat(7) { column ->
@@ -108,16 +115,23 @@ object WidgetUpdater {
                 })
                 if (date == today) cell.setInt(R.id.widget_day_text, "setBackgroundResource", R.drawable.widget_today)
                 cell.removeAllViews(R.id.widget_day_events)
-                dayEvents.take(capacity).forEachIndexed { index, event ->
+                val preview = calendarDayPreview(dayEvents, capacity)
+                preview.events.forEach { event ->
                     val entry = RemoteViews(context.packageName, R.layout.widget_month_event)
-                    val extra = if (index == capacity - 1 && count > capacity) " +${count - capacity}" else ""
-                    // Place overflow first so ellipsizing cannot hide it in a narrow day cell.
-                    entry.setTextViewText(R.id.widget_day_event, if (extra.isEmpty()) event.title.replace('\n', ' ') else "+${count - capacity} ${event.title.replace('\n', ' ')}")
+                    entry.setTextViewText(R.id.widget_day_event, event.title.replace('\n', ' '))
                     entry.setTextColor(R.id.widget_day_event, Color.rgb(36, 42, 61))
-                    fun tint(channel: Int) = (channel * .18 + 255 * .82).toInt()
+                    fun tint(channel: Int) = (channel * .28 + 255 * .72).toInt()
                     entry.setInt(R.id.widget_day_event, "setBackgroundColor", Color.rgb(tint(Color.red(event.color)), tint(Color.green(event.color)), tint(Color.blue(event.color))))
                     if (android.os.Build.VERSION.SDK_INT >= 31) entry.setViewLayoutHeight(R.id.widget_day_event, lineHeight.toFloat(), android.util.TypedValue.COMPLEX_UNIT_DIP)
                     cell.addView(R.id.widget_day_events, entry)
+                }
+                if (capacity > 0 && preview.remaining > 0) {
+                    val more = RemoteViews(context.packageName, R.layout.widget_month_event)
+                    more.setTextViewText(R.id.widget_day_event, "+${preview.remaining}")
+                    more.setTextColor(R.id.widget_day_event, Color.rgb(89, 101, 216))
+                    more.setContentDescription(R.id.widget_day_event, "일정 ${preview.remaining}개 더 보기")
+                    if (android.os.Build.VERSION.SDK_INT >= 31) more.setViewLayoutHeight(R.id.widget_day_event, lineHeight.toFloat(), android.util.TypedValue.COMPLEX_UNIT_DIP)
+                    cell.addView(R.id.widget_day_events, more)
                 }
                 cell.setOnClickPendingIntent(R.id.widget_day_root, open(context, date))
                 week.addView(R.id.widget_week_row, cell)
@@ -161,7 +175,7 @@ object WidgetUpdater {
     }
 
     private fun open(context: Context, date: LocalDate): PendingIntent = PendingIntent.getActivity(context, date.toEpochDay().toInt(),
-        Intent(context, MainActivity::class.java).putExtra("date", date.toString()).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        Intent(context, MainActivity::class.java).putExtra("date", date.toString()).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun actions(context: Context, views: RemoteViews, today: LocalDate, receiver: Class<*>, id: Int) {
