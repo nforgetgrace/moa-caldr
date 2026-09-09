@@ -1,0 +1,1 @@
+PASS: revoking READ_CALENDAR removes device_cache and device/Google events; the three Naver cache entries remain.

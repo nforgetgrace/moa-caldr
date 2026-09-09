@@ -1,0 +1,14 @@
+{
+  "tests": 76,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "suites": {
+    "com.moa.calendar.data.CalDavClientTest": 27,
+    "com.moa.calendar.data.CalendarDayPreviewTest": 8,
+    "com.moa.calendar.data.TaskCodecTest": 7,
+    "com.moa.calendar.data.IcsCodecTest": 14,
+    "com.moa.calendar.data.AccountSelectionTest": 11,
+    "com.moa.calendar.data.DeviceCalendarCacheTest": 9
+  }
+}

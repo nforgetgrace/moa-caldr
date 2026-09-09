@@ -173,4 +173,22 @@ class CalDavClientTest {
     @Test(expected = IOException::class) fun `failed resource response cannot be treated as empty successful calendar`() {
         CalDavClient.parseResponses("<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>/a.ics</d:href><d:status>HTTP/1.1 403 Forbidden</d:status></d:response></d:multistatus>", strict = true)
     }
+    @Test(expected = IOException::class) fun `partially failed calendar discovery cannot confirm deleted calendars`() {
+        reply(multi("/", ""))
+        val visible = multi("/cal/", "<d:resourcetype><c:calendar/></d:resourcetype>")
+        reply(visible.replace("</d:multistatus>", "<d:response><d:href>/temporarily-unavailable/</d:href><d:status>HTTP/1.1 503 Unavailable</d:status></d:response></d:multistatus>"))
+        client().discover()
+    }
+    @Test fun `confirmed empty REPORT is a valid deletion result`() {
+        reply("<d:multistatus xmlns:d=\"DAV:\"/>")
+        assertTrue(client().fetch(calendar(), 0, 86400000).isEmpty())
+    }
+    @Test(expected = IOException::class) fun `server outage cannot be mistaken for an empty calendar`() {
+        server.enqueue(MockResponse().setResponseCode(503).setBody("Service unavailable"))
+        client().fetch(calendar(), 0, 86400000)
+    }
+    @Test(expected = IllegalArgumentException::class) fun `login HTML with success status cannot clear cached events`() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>Sign in</body></html>"))
+        client().fetch(calendar(), 0, 86400000)
+    }
 }

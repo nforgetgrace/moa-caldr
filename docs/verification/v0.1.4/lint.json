@@ -1,0 +1,16 @@
+{
+  "severity": {
+    "Warning": 30
+  },
+  "categories": {
+    "ApplySharedPref": 1,
+    "OldTargetApi": 1,
+    "UnusedAttribute": 6,
+    "AndroidGradlePluginVersion": 1,
+    "GradleDependency": 1,
+    "NewerVersionAvailable": 3,
+    "ModifierParameter": 1,
+    "SmallSp": 1,
+    "UseKtx": 15
+  }
+}

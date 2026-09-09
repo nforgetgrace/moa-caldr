@@ -44,7 +44,8 @@ class CalDavClient(
         val homeHref = propertyHref(principalProps, "calendar-home-set")
             ?: propertyHref(first, "calendar-home-set")
         val home = homeHref?.let { safeUrl(principal, it) } ?: principal
-        val responses = parseResponses(propfind(home, "1"))
+        // A partially failed listing cannot confirm that cached calendars were removed.
+        val responses = parseResponses(propfind(home, "1"), strict = true)
         val calendars = responses.mapNotNull { (href, prop) ->
             if (prop.getElementsByTagNameNS(CAL, "calendar").length == 0) return@mapNotNull null
             val url = safeUrl(home, href)
@@ -135,7 +136,7 @@ class CalDavClient(
     private fun request(url: HttpUrl, method: String, body: String?, headers: Map<String, String>, type: String = "application/xml; charset=utf-8", redirects: Int = 0): Pair<String, String> {
         val builder = Request.Builder().url(url).method(method, body?.toRequestBody(type.toMediaType()))
             .header("Authorization", Credentials.basic(username, password, Charsets.UTF_8))
-            .header("User-Agent", "MoaCalendar/0.1.3 (Android; CalDAV)")
+            .header("User-Agent", "MoaCalendar/0.1.4 (Android; CalDAV)")
         headers.forEach { (key, value) -> builder.header(key, value) }
         http.newCall(builder.build()).execute().use { response ->
             if (response.code in listOf(301, 302, 307, 308)) {

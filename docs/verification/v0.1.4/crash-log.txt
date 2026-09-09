@@ -1,0 +1,5 @@
+AndroidRuntime log inspection, isolated emulator-5554
+Command: adb -s emulator-5554 logcat -d -s AndroidRuntime
+Captured lines: 585
+FATAL EXCEPTION matches: 0
+Routine VM and adb UI-helper startup records omitted from this summary.

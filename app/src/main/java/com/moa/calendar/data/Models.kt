@@ -33,6 +33,9 @@ fun CalendarInfo.accountLabel(): String {
     return if (account.isBlank()) service else "$service · $account"
 }
 
+fun CalendarInfo.selectionSubtitle(): String =
+    if (account.trim().equals(name.trim(), ignoreCase = true)) copy(account = "").accountLabel() else accountLabel()
+
 fun calendarsForGoogleAccount(calendars: List<CalendarInfo>, account: String?): List<CalendarInfo> =
     calendars.filter { it.source != CalendarSource.GOOGLE || account == null || it.account.equals(account.trim(), ignoreCase = true) }
 

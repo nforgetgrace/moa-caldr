@@ -53,13 +53,32 @@ class CalendarRepository(context: Context) {
                 try {
                     val credentials = vault.read()
                     val client = CalDavClient(credentials.server, credentials.username, credentials.password)
+                    val window = SyncWindow.read(JSONObject(prefs.getString("remote", "{}")!!), from, to)
                     val calendars = client.discover()
-                    val resources = calendars.associateWith { client.fetch(it, from, to) }
-                    resources.forEach { (calendar, data) -> data.forEach { IcsCodec.parse(it, calendar, from, to) } }
-                    storeRemote(calendars, resources, fetchTasks(client, calendars))
+                    val resources = calendars.associateWith { client.fetch(it, window.from, window.to) }
+                    resources.forEach { (calendar, data) -> data.forEach { IcsCodec.parse(it, calendar, window.from, window.to) } }
+                    storeRemote(calendars, resources, fetchTasks(client, calendars), window)
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     prefs.edit().putString("last_sync_error", (e.message ?: "네이버 연결을 확인해 주세요.") + " 저장된 일정을 표시합니다.").apply()
+                }
+            }
+        }
+        val deviceRead = deviceLock.withLock {
+            if (!device.hasReadPermission()) {
+                prefs.edit().remove("device_cache").apply()
+                DeviceCalendarRead(DeviceCalendarSnapshot(emptyList(), emptyList(), SyncWindow(from, to)))
+            } else {
+                val previous = prefs.getString("device_cache", null)?.let { runCatching { DeviceCalendarSnapshot.decode(it) }.getOrNull() }
+                val result = readDeviceCalendars(previous, from, to, device::calendars, device::events)
+                if (!device.hasReadPermission()) {
+                    prefs.edit().remove("device_cache").apply()
+                    DeviceCalendarRead(DeviceCalendarSnapshot(emptyList(), emptyList(), SyncWindow(from, to)))
+                } else {
+                    if (result.error == null && result.snapshot != previous) {
+                        prefs.edit().putString("device_cache", result.snapshot.encode()).apply()
+                    }
+                    result
                 }
             }
         }
@@ -70,9 +89,11 @@ class CalendarRepository(context: Context) {
         val errors = mutableListOf<String>()
         if (naverConnected()) (state["last_sync_error"] as? String)?.let { errors += it }
         val account = state["google_account"] as? String
-        val allDeviceCalendars = runCatching { device.calendars() }.getOrElse { errors += "기기 캘린더를 읽지 못했어요. 권한을 확인해 주세요."; emptyList() }
+        deviceRead.error?.let { errors += it }
+        val allDeviceCalendars = deviceRead.snapshot.calendars
         val deviceCalendars = calendarsForGoogleAccount(allDeviceCalendars, account)
-        val deviceEvents = runCatching { device.events(deviceCalendars, from, to) }.getOrElse { errors += "기기 일정을 읽지 못했어요. 권한을 확인해 주세요."; emptyList() }
+        val deviceIds = deviceCalendars.filter { it.syncEnabled }.map { it.id }.toSet()
+        val deviceEvents = deviceRead.snapshot.events.filter { it.calendarId in deviceIds && it.startMillis < to && it.endMillis.coerceAtLeast(it.startMillis + 1) > from }
         val remoteCalendars = readCalendars(remote)
         val remoteEvents = mutableListOf<CalendarEvent>()
         for (calendar in remoteCalendars) {
@@ -108,7 +129,7 @@ class CalendarRepository(context: Context) {
             val resources = calendars.associateWith { client.fetch(it, from, to) }
             resources.forEach { (c, data) -> data.forEach { IcsCodec.parse(it, c, from, to) } }
             vault.save(credentials)
-            storeRemote(calendars, resources, fetchTasks(client, calendars), credentials.username)
+            storeRemote(calendars, resources, fetchTasks(client, calendars), SyncWindow(from, to), credentials.username)
         }
     }
 
@@ -200,8 +221,8 @@ class CalendarRepository(context: Context) {
         resources.forEach { put(JSONObject().put("href", it.href).put("etag", it.etag).put("ics", it.ics)) }
     }
     private fun storeRemote(calendars: List<CalendarInfo>, resources: Map<CalendarInfo, List<DavResource>>,
-        tasks: Result<Map<CalendarInfo, List<DavResource>>>, account: String? = null) {
-        val json = JSONObject().put("calendars", JSONArray().apply { calendars.forEach {
+        tasks: Result<Map<CalendarInfo, List<DavResource>>>, window: SyncWindow, account: String? = null) {
+        val json = JSONObject().put("from", window.from).put("to", window.to).put("calendars", JSONArray().apply { calendars.forEach {
             put(JSONObject().put("id", it.id).put("name", it.name).put("account", it.account).put("color", it.color).put("writable", it.writable).put("events", it.supportsEvents).put("tasks", it.supportsTasks))
         } }).put("resources", JSONObject().apply { resources.forEach { (calendar, data) -> put(calendar.id, resourceJson(data)) } })
         val editor = prefs.edit().putString("remote", json.toString())
@@ -226,6 +247,7 @@ class CalendarRepository(context: Context) {
 
     companion object {
         private val lock = Mutex()
+        private val deviceLock = Mutex()
     }
 }
 

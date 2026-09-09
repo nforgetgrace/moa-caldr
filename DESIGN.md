@@ -100,3 +100,12 @@
 - Widget side padding is 10dp, top/bottom 8dp; title text is 10sp. Give busy weeks enough room before distributing remaining height. At smaller sizes reduce title capacity while preserving the count.
 - App week rows size to their actual title rows (minimum 48dp), reducing empty space while keeping date targets usable. Full event titles in the selected-day list may wrap.
 - Private supplied screenshots remain outside Git; publish only isolated emulator fixtures as verification evidence.
+
+## Account and calendar pickers · v0.1.4
+- Use a consistent, wide selection dialog with a fixed title/close row and scrollable choices. Follow existing rounded surfaces, restrained accent colors and 48dp touch targets.
+- Google email addresses remain on one line, with ellipsis only when necessary. Full text remains available to accessibility. Move the selected check to the trailing edge instead of consuming email width with a radio button.
+- Calendar destination shows the name once, with service/account below. Omit a repeated account label when it is identical to the calendar name; keep distinct calendars with identical names selectable by ID and account.
+- Calendar choices are grouped by service, use source colors and mark the current choice. Preserve the event draft when opening, choosing or dismissing the picker. Existing event ownership stays locked.
+- Keep the v0.1.3 widget typography/padding, source colors, silent refresh and recent-activity navigation behavior.
+- Keep the last complete device-calendar snapshot on query failure. Clear it when calendar permission is revoked, and accept successful empty results. Background refresh must not narrow previously cached dates.
+- A partial CalDAV collection listing is an error, not evidence that calendars were deleted.

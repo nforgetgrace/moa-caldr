@@ -1,0 +1,8 @@
+package: name='com.moa.calendar' versionCode='5' versionName='0.1.4' platformBuildVersionName='17' platformBuildVersionCode='37' compileSdkVersion='37' compileSdkVersionCodename='17'
+sdkVersion:'26'
+targetSdkVersion:'36'
+uses-permission: name='android.permission.INTERNET'
+uses-permission: name='android.permission.ACCESS_NETWORK_STATE'
+uses-permission: name='android.permission.READ_CALENDAR'
+uses-permission: name='android.permission.WRITE_CALENDAR'
+uses-permission: name='android.permission.READ_SYNC_SETTINGS'

@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moa.calendar.data.*
@@ -101,7 +102,7 @@ import java.time.format.DateTimeFormatter
         }
         Spacer(Modifier.height(27.dp))
         Text("일정은 선택한 원본 캘린더에 저장됩니다. Google과 네이버 간 자동 복제는 하지 않습니다. 네이버 비밀번호는 기기에 암호화해 보관합니다.", color = Muted, fontSize = 11.sp)
-        Text("MOA  0.1.3  ·  Made for your everyday", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 18.dp))
+        Text("MOA  0.1.4  ·  Made for your everyday", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 18.dp))
     }
     if (disconnectDialog) AlertDialog(onDismissRequest = { disconnectDialog = false }, title = { Text("네이버 연결을 해제할까요?") },
         text = { Text("이 기기의 로그인 정보와 저장된 네이버 일정만 지웁니다. 네이버에 있는 원본 일정은 유지됩니다.") },
@@ -114,36 +115,14 @@ import java.time.format.DateTimeFormatter
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(41.dp).clip(RoundedCornerShape(13.dp)).background(color.copy(alpha = .08f)), contentAlignment = Alignment.Center) { Text(letter, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, color = color) }
-                Column(Modifier.padding(start = 13.dp)) {
+                Column(Modifier.weight(1f).padding(start = 13.dp)) {
                     Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text(subtitle, fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 5.dp))
+                    Text(subtitle, fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 5.dp), maxLines = if (subtitle.contains("@")) 1 else 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             FilledTonalButton(onClick = onAction, Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = color.copy(alpha = .08f), contentColor = color)) { Text(action, fontSize = 12.sp) }
         }
     }
-}
-
-@Composable fun GoogleAccountDialog(accounts: List<String>, selected: String?, onDismiss: () -> Unit,
-    onSelect: (String?) -> Unit, onAddAccount: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Google 계정 선택") },
-        text = {
-            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
-                Text("선택한 계정의 일정을 앱과 위젯에 표시합니다.", fontSize = 12.sp, color = Muted)
-                (accounts + listOfNotNull(selected)).distinct().forEach { account ->
-                    Row(Modifier.fillMaxWidth().clickable { onSelect(account) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected == account, onClick = { onSelect(account) })
-                        Column(Modifier.weight(1f)) {
-                            Text(account, fontSize = 13.sp)
-                            if (account !in accounts) Text("기기 캘린더 동기화 대기", fontSize = 10.sp, color = Muted)
-                        }
-                    }
-                }
-                if (accounts.size > 1) TextButton(onClick = { onSelect(null) }) { Text("이 기기의 모든 Google 계정 표시", fontSize = 12.sp) }
-                if (accounts.isEmpty()) Text("아직 동기화된 Google 캘린더가 없어요. 계정을 추가하거나 기기 동기화를 확인해 주세요.", fontSize = 12.sp, color = Muted, modifier = Modifier.padding(vertical = 16.dp))
-                TextButton(onClick = onAddAccount) { Text("다른 Google 계정 선택 / 추가", fontSize = 13.sp) }
-            }
-        }, confirmButton = { TextButton(onClick = onDismiss) { Text("닫기") } })
 }
 
 @Composable fun WidgetPage(events: List<CalendarEvent>, onPin: (Boolean) -> Unit) {

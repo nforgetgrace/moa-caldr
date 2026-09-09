@@ -1,0 +1,14 @@
+저장할 캘린더 [89,685][865,765] clickable=false
+선택 창 닫기 [900,697][958,755] clickable=false
+일정을 등록할 원본 캘린더를 골라 주세요. [89,793][631,838] clickable=false
+Google [89,896][189,933] clickable=false
+G [149,1019][178,1068] clickable=false
+업무 캘린더 [231,996][394,1045] clickable=false
+Google · calendar.owner.long.name@example.test [231,1056][852,1090] clickable=false
+기기 캘린더 [89,1164][242,1209] clickable=false
+My Calendar [231,1274][421,1314] clickable=false
+기기 캘린더 [231,1325][368,1365] clickable=false
+My Calendar [231,1463][421,1503] clickable=false
+기기 캘린더 · second-local-user [231,1514][609,1554] clickable=false
+가족 일정 [231,1647][363,1696] clickable=false
+기기 캘린더 · local-user [231,1707][510,1747] clickable=false

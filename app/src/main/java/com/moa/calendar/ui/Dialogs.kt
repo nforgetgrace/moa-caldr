@@ -14,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -38,6 +40,8 @@ import java.time.format.DateTimeFormatter
     onSave: suspend (EventDraft) -> Unit, onDelete: suspend () -> Unit,
 ) {
     val context = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     val zone = if (existing?.allDay == true) ZoneOffset.UTC else ZoneId.systemDefault()
     val start = existing?.let { Instant.ofEpochMilli(it.startMillis).atZone(zone) }
@@ -79,21 +83,14 @@ import java.time.format.DateTimeFormatter
                 IconButton(onClick = onDismiss, enabled = !busy) { LineIcon("close", label = "닫기") }
             }
             val sourceCalendar = calendars.firstOrNull { it.id == calendarId }
-            Text(if (existing == null) "선택한 원본 캘린더에 저장해요" else "등록된 계정", color = Muted, fontSize = 11.sp)
-            if (sourceCalendar != null) {
-                Text(sourceCalendar.accountLabel(), color = Ink, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
-                Text(sourceCalendar.name, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
-            }
+            if (existing == null) Text("선택한 원본 캘린더에 저장해요", color = Muted, fontSize = 11.sp)
             Spacer(Modifier.height(20.dp))
             OutlinedTextField(title, { title = it }, label = { Text("일정 제목") }, modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
             Spacer(Modifier.height(12.dp))
-            Box {
-                OutlinedButton(onClick = { menu = true }, Modifier.fillMaxWidth(), enabled = existing == null && !busy, shape = RoundedCornerShape(14.dp), contentPadding = PaddingValues(16.dp)) {
-                    Text(calendars.firstOrNull { it.id == calendarId }?.let { "${it.name} · ${it.account}" } ?: "캘린더 선택")
-                }
-                DropdownMenu(menu, { menu = false }) {
-                    calendars.filter { it.writable }.forEach { calendar -> DropdownMenuItem(text = { Text("${calendar.name} · ${calendar.account}") }, onClick = { calendarId = calendar.id; menu = false }) }
-                }
+            CalendarDestination(sourceCalendar, enabled = existing == null && !busy) {
+                focus.clearFocus()
+                keyboard?.hide()
+                menu = true
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("하루 종일", Modifier.weight(1f)); Switch(allDay, { allDay = it }, enabled = !busy && !readOnly, modifier = Modifier.semantics { contentDescription = "하루 종일" })
@@ -130,6 +127,7 @@ import java.time.format.DateTimeFormatter
             }
         }
     }
+    if (menu) CalendarSelectionDialog(calendars, calendarId, onDismiss = { menu = false }) { id -> calendarId = id; menu = false }
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("일정을 삭제할까요?") },
         text = { Text("‘${existing?.title}’ 일정이 원본 캘린더에서도 삭제됩니다.") },
         confirmButton = { TextButton(onClick = {

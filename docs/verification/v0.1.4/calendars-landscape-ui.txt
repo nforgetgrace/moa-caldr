@@ -1,0 +1,12 @@
+저장할 캘린더 [618,154][1784,234] clickable=false
+선택 창 닫기 [1819,166][1877,224] clickable=false
+일정을 등록할 원본 캘린더를 골라 주세요. [618,262][1160,307] clickable=false
+Google [618,365][718,402] clickable=false
+G [678,488][707,537] clickable=false
+개인 캘린더 [760,465][923,514] clickable=false
+Google · personal.calendar@example.test [760,525][1277,559] clickable=false
+NAVER [618,633][718,670] clickable=false
+N [677,756][707,805] clickable=false
+개인 일정 [760,733][892,782] clickable=false
+NAVER · fixture-naver [760,793][1023,827] clickable=false
+기기 캘린더 [618,901][771,946] clickable=false

@@ -1,0 +1,32 @@
+{
+  "iteration": 15,
+  "verdict": "pass",
+  "method": "Manual API 35 emulator screenshot review; not pixel comparison or all-frame video analysis",
+  "evidence": [
+    "docs/screenshots/v0.1.4/accounts.png",
+    "docs/screenshots/v0.1.4/accounts-font130.png",
+    "docs/screenshots/v0.1.4/calendars.png",
+    "docs/screenshots/v0.1.4/calendars-font130.png",
+    "docs/screenshots/v0.1.4/calendars-landscape.png",
+    "docs/screenshots/v0.1.4/editor.png",
+    "docs/screenshots/v0.1.4/event-source.png",
+    "docs/screenshots/v0.1.4/widget-final.png",
+    "docs/screenshots/v0.1.4/widget-process-reopen.png",
+    "docs/screenshots/v0.1.4/day-details.png"
+  ],
+  "findings": [
+    "One-line Google emails, with intentional ellipsis for long addresses at 130% font scale",
+    "Calendar name displayed once per destination; account is a secondary line",
+    "Same-named calendars retain separate selectable identities and source accounts",
+    "Title, close button and selected indication remain visible in account and calendar pickers",
+    "Landscape dialog constrained to the actual window with a scrollable choice area",
+    "Final app and month widget show three titles plus +2 for five entries",
+    "Naver events and task entries remain lavender, Google entries remain green",
+    "Widget entry after background process death restores five stored schedules"
+  ],
+  "limitations": [
+    "No Galaxy hardware or authenticated cloud tests",
+    "All displayed calendars and events are isolated QA fixtures"
+  ],
+  "complete": true
+}

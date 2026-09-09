@@ -44,4 +44,20 @@ class AccountSelectionTest {
         assertEquals(listOf(googleB), result.filter { it.source == CalendarSource.GOOGLE })
         assertEquals(listOf(local), result.filter { it.source == CalendarSource.DEVICE })
     }
+    @Test fun calendarPickerDoesNotRepeatIdenticalNameAndAccount() {
+        val calendar = device.copy(name = "My Calendar", account = "My Calendar")
+        assertEquals("기기 캘린더", calendar.selectionSubtitle())
+        assertEquals("기기 캘린더", calendar.copy(account = " my calendar ").selectionSubtitle())
+    }
+    @Test fun calendarPickerKeepsDifferentAccountIdentitiesForMatchingNames() {
+        val first = googleA.copy(name = "My Calendar")
+        val second = googleB.copy(name = "My Calendar")
+        assertEquals("Google · work@example.test", first.selectionSubtitle())
+        assertEquals("Google · personal@example.test", second.selectionSubtitle())
+        assertNotEquals(first.id, second.id)
+    }
+    @Test fun emailNamedCalendarStillIdentifiesTheServiceWithoutRepeatingEmail() {
+        assertEquals("Google", googleA.copy(name = googleA.account).selectionSubtitle())
+        assertEquals("NAVER · naver-user", naver.selectionSubtitle())
+    }
 }

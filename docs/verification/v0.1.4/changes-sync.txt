@@ -1,0 +1,4 @@
+PASS: committed additions, edits and deletions update the open calendar without removing the unchanged event or showing a spinner.
+READY: changes sync retains the event; spinner visibility verified.
+PASS: repository refresh failure preserves cached events.
+PASS: cached calendars/events and widget updates stay available during a held sync lock; confirmed empty cache removes deleted events.

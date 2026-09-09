@@ -19,8 +19,8 @@ class DeviceCalendars(private val context: Context) {
     fun calendars(): List<CalendarInfo> {
         if (!hasReadPermission()) return emptyList()
         val result = mutableListOf<CalendarInfo>()
-        resolver.query(CalendarContract.Calendars.CONTENT_URI, arrayOf("_id", "calendar_displayName", "account_name", "account_type", "calendar_color", "calendar_access_level", "sync_events"),
-            null, null, "calendar_displayName ASC")?.use { c ->
+        checkNotNull(resolver.query(CalendarContract.Calendars.CONTENT_URI, arrayOf("_id", "calendar_displayName", "account_name", "account_type", "calendar_color", "calendar_access_level", "sync_events"),
+            null, null, "calendar_displayName ASC")) { "기기 캘린더 조회 응답이 없어요." }.use { c ->
             while (c.moveToNext()) result += CalendarInfo(
                 "device:${c.getLong(0)}", c.getString(1) ?: "캘린더", c.getString(2).orEmpty(),
                 if (c.getString(3) == "com.google") CalendarSource.GOOGLE else CalendarSource.DEVICE,
@@ -41,7 +41,7 @@ class DeviceCalendars(private val context: Context) {
         ContentUris.appendId(builder, to)
         val result = mutableListOf<CalendarEvent>()
         val columns = arrayOf("event_id", "calendar_id", "title", "begin", "end", "allDay", "description", "eventLocation", "rrule", "rdate", "original_id")
-        resolver.query(builder.build(), columns, "deleted=0 AND (eventStatus IS NULL OR eventStatus!=?)", arrayOf(CalendarContract.Events.STATUS_CANCELED.toString()), "begin ASC")?.use { c ->
+        checkNotNull(resolver.query(builder.build(), columns, "deleted=0 AND (eventStatus IS NULL OR eventStatus!=?)", arrayOf(CalendarContract.Events.STATUS_CANCELED.toString()), "begin ASC")) { "기기 일정 조회 응답이 없어요." }.use { c ->
             while (c.moveToNext()) {
                 val calendar = byId["device:${c.getLong(1)}"] ?: continue
                 result += CalendarEvent("device:${c.getLong(0)}@${c.getLong(3)}", calendar.id,

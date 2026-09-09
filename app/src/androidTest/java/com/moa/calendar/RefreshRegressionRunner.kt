@@ -46,7 +46,7 @@ class RefreshRegressionRunner : Instrumentation() {
             val repository = CalendarRepository(targetContext)
             fun openApp(): Activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             var retainedActivity: Activity? = null
-            if (scenario == "manual" || scenario == "widget") {
+            if (scenario == "manual" || scenario == "widget" || scenario == "changes") {
                 retainedActivity = openApp()
                 awaitNode("RefreshRetentionFixture")
                 SystemClock.sleep(500)
@@ -80,9 +80,30 @@ class RefreshRegressionRunner : Instrumentation() {
                         check(refresh?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
                         awaitNode("수동 동기화 중")
                     } else {
-                        check(findNode(uiAutomation.rootInActiveWindow, "수동 동기화 중") == null)
+                        check(findNode(currentRoot(), "수동 동기화 중") == null)
                     }
-                    check(findNode(uiAutomation.rootInActiveWindow, "RefreshRetentionFixture") != null)
+                    check(findNode(currentRoot(), "RefreshRetentionFixture") != null)
+                    if (scenario == "changes") {
+                        val changed = ics.replace("UID:retained", "UID:changed").replace("RefreshRetentionFixture", "ChangeBefore")
+                        fun publish(value: String?) {
+                            val resources = JSONArray().put(JSONObject().put("href", "${id}one.ics").put("ics", ics))
+                            if (value != null) resources.put(JSONObject().put("href", "${id}two.ics").put("ics", value))
+                            remote.getJSONObject("resources").put(id, resources)
+                            check(prefs.edit().putString("remote", remote.toString()).commit())
+                        }
+                        publish(changed)
+                        awaitNode("ChangeBefore")
+                        check(findNode(currentRoot(), "RefreshRetentionFixture") != null)
+                        publish(changed.replace("ChangeBefore", "ChangeAfter"))
+                        awaitNode("ChangeAfter")
+                        awaitAbsent("ChangeBefore")
+                        check(findNode(currentRoot(), "RefreshRetentionFixture") != null)
+                        publish(null)
+                        awaitAbsent("ChangeAfter")
+                        check(findNode(currentRoot(), "RefreshRetentionFixture") != null)
+                        check(findNode(currentRoot(), "수동 동기화 중") == null)
+                        sendStatus(1, Bundle().apply { putString("stream", "PASS: committed additions, edits and deletions update the open calendar without removing the unchanged event or showing a spinner.\n") })
+                    }
                     sendStatus(1, Bundle().apply { putString("stream", "READY: $scenario sync retains the event; spinner visibility verified.\n") })
                     SystemClock.sleep(20_000) // Bounded screenshot capture window; no production delay.
                 }
@@ -103,7 +124,7 @@ class RefreshRegressionRunner : Instrumentation() {
                     clickWidgetDate(today)
                     awaitNode("나의 캘린더")
                     awaitNode("RefreshRetentionFixture")
-                    check(findNode(uiAutomation.rootInActiveWindow, "수동 동기화 중") == null)
+                    check(findNode(currentRoot(), "수동 동기화 중") == null)
                     mutex.unlock(owner)
                     acquired = false
                     sendStatus(1, Bundle().apply { putString("stream", "PASS: real home-widget date clicks reuse the recent activity, change the selected date and retain cache after closing/reopening during sync.\n") })
@@ -117,11 +138,20 @@ class RefreshRegressionRunner : Instrumentation() {
                     targetContext.startActivity(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     awaitNode("RefreshRetentionFixture")
                     SystemClock.sleep(500)
-                    check(findNode(uiAutomation.rootInActiveWindow, "수동 동기화 중") == null)
+                    check(findNode(currentRoot(), "수동 동기화 중") == null)
                     mutex.unlock(owner)
                     acquired = false
                     sendStatus(1, Bundle().apply { putString("stream", "PASS: returning to the app after manual refresh starts a silent refresh.\n") })
                 }
+                // Exercise repository error handling without any real account or network credentials.
+                val vault = targetContext.getSharedPreferences("moa_vault", 0)
+                try {
+                    vault.edit().putString("encrypted", "invalid-test-fixture").commit()
+                    val failed = repository.load(from, from + 86_400_000, true)
+                    check(failed.errors.isNotEmpty())
+                    check(failed.events.any { it.title == "RefreshRetentionFixture" })
+                } finally { vault.edit().remove("encrypted").commit() }
+                sendStatus(1, Bundle().apply { putString("stream", "PASS: repository refresh failure preserves cached events.\n") })
                 // A genuinely empty successful result must still remove deleted events.
                 remote.getJSONObject("resources").put(id, JSONArray())
                 prefs.edit().putString("remote", remote.toString()).commit()
@@ -129,6 +159,10 @@ class RefreshRegressionRunner : Instrumentation() {
             }
             result.putString("stream", "PASS: cached calendars/events and widget updates stay available during a held sync lock; confirmed empty cache removes deleted events.\n")
         } catch (e: Throwable) {
+            uiAutomation.takeScreenshot()?.let { bitmap ->
+                targetContext.openFileOutput("refresh-regression-failure.png", 0).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                bitmap.recycle()
+            }
             result.putString("stream", "FAIL: ${e.javaClass.simpleName}: ${e.message}\n")
             result.putString("failure", e.javaClass.simpleName)
         } finally {
@@ -147,9 +181,15 @@ class RefreshRegressionRunner : Instrumentation() {
         finish(if (result.containsKey("failure")) 0 else -1, result)
     }
 
+    private fun currentRoot(): AccessibilityNodeInfo? {
+        // Reused Compose nodes can otherwise leave stale text in UiAutomation's cache.
+        if (android.os.Build.VERSION.SDK_INT >= 34) uiAutomation.clearCache()
+        return uiAutomation.rootInActiveWindow
+    }
+
     private fun awaitNode(text: String): AccessibilityNodeInfo {
         repeat(60) {
-            findNode(uiAutomation.rootInActiveWindow, text)?.let { return it }
+            findNode(currentRoot(), text)?.let { return it }
             SystemClock.sleep(100)
         }
         error("Missing UI node: $text")
@@ -158,6 +198,14 @@ class RefreshRegressionRunner : Instrumentation() {
     private fun goHome() {
         targetContext.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         SystemClock.sleep(500)
+    }
+
+    private fun awaitAbsent(text: String) {
+        repeat(60) {
+            if (findNode(currentRoot(), text) == null) return
+            SystemClock.sleep(100)
+        }
+        error("Unexpected stale UI node: $text")
     }
 
     private fun clickNode(text: String) {
@@ -169,7 +217,7 @@ class RefreshRegressionRunner : Instrumentation() {
     private fun clickWidgetDate(date: LocalDate) {
         val label = "${date.monthValue}월 ${date.dayOfMonth}일 일정"
         repeat(4) {
-            if (findNode(uiAutomation.rootInActiveWindow, label) != null) { clickNode(label); return }
+            if (findNode(currentRoot(), label) != null) { clickNode(label); return }
             uiAutomation.executeShellCommand("input swipe 950 1000 150 1000 350").close()
             SystemClock.sleep(600)
         }

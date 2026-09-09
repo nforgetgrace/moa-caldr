@@ -1,0 +1,8 @@
+Removed isolated calendar 1 Moa014g1
+Removed isolated calendar 2 Moa014g2
+Removed isolated calendar 3 Moa014local1
+Removed isolated calendar 4 Moa014local2
+Removed isolated calendar 5 Moa014local3
+Success
+Starting: Intent { cmp=com.moa.calendar/.MainActivity }
+PASS: isolated Provider rows, cached fixtures, test APK and test failure capture removed; font scale and portrait restored.

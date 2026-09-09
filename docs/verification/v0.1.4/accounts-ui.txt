@@ -1,0 +1,11 @@
+Google 계정 선택 [89,781][865,861] clickable=false
+선택 창 닫기 [900,793][958,851] clickable=false
+앱과 위젯에 표시할 계정을 골라 주세요. [89,889][602,934] clickable=false
+G [149,1036][178,1085] clickable=false
+calendar.owner.long.name@example.test [231,1040][858,1080] clickable=false
+G [149,1225][178,1274] clickable=false
+personal.calendar@example.test [231,1229][729,1269] clickable=false
+G [149,1414][178,1463] clickable=false
+모든 Google 계정 [231,1388][478,1437] clickable=false
+기기에 동기화된 계정을 함께 표시 [231,1448][623,1488] clickable=false
+다른 계정 선택 · 추가 [427,1598][717,1647] clickable=false
