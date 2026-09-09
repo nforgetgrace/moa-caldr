@@ -30,7 +30,7 @@ class RefreshRegressionRunner : Instrumentation() {
         val result = Bundle()
         val prefs = targetContext.getSharedPreferences("moa_calendar", 0)
         val original = prefs.all
-        val mutex = CalendarRepository::class.java.getDeclaredField("lock").apply { isAccessible = true }.get(null) as Mutex
+        val mutex = CalendarRepository::class.java.getDeclaredField("syncLock").apply { isAccessible = true }.get(null) as Mutex
         val owner = Any()
         var acquired = false
         try {

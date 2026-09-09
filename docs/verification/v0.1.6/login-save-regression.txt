@@ -1,0 +1,10 @@
+PASS: verified login closes the real dialog while the first REPORT remains blocked; cached reads stay responsive.
+PASS: real Naver and Google-provider event editors save and close within 2.5 seconds while REPORT stays blocked.
+PASS: first sync finishes after leaving the activity; events/tasks publish together; completed initial job skips duplicate fetch.
+PASS: same-account reconnect verifies access without REPORT and retains existing events/tasks.
+PASS: authentication failure preserves the account; background fetch failure preserves data and pending retry; retry recovers.
+PASS: switching Naver account removes only the old Naver cache and preserves Google selection.
+PASS: delete proceeds during REPORT; an older response cannot resurrect the deleted event.
+PASS: disconnect proceeds during REPORT; stale results and errors cannot restore the old account.
+PASS: initial job registration is persisted and retains the requested calendar range.
+PASS: login lifecycle regression completed.

@@ -1,7 +1,7 @@
 # Design
 
 ## Source of truth
-- Status: Active. Last refreshed: 2026-09-09.
+- Status: Active. Last refreshed: 2026-09-10.
 - Surfaces: native Android app, month widget, agenda widget.
 - Evidence: `docs/reference.png`, supplied by the user and excluded from Git to keep the private reference local. White Samsung Calendar screens with compact month grid, color-coded events, agenda, event editor and account drawer. The second temporary screenshot path is no longer present.
 - Interpretation: use the reference's quiet hierarchy and calendar-first navigation, with an original MOA identity. This is an inspired implementation, not a pixel-identical clone.
@@ -96,7 +96,7 @@
 - Initial cache loading must not pretend the user has zero connected calendars. A manual refresh may show a spinner within the existing 44dp action slot; periodic refresh and returning to the app must remain silent.
 - Widget date clicks reuse an existing recent activity and apply the requested date through onNewIntent, returning from settings/editor to the calendar without dropping the current snapshot. Repeated clicks on the same date are distinct navigation requests.
 - NAVER events and tasks use lavender #B39DDB. Google events use green #03A86B. Apply the mapping when reading older cached metadata too; other device calendars retain their own colors.
-- Month cells in app and widget show at most three short titles followed by a separate +N line. The selected date has an explicit link to the full schedule with time and account labels.
+- The home widget shows at most three short titles followed by a separate +N line; the app displays every event (v0.1.6 override). The selected date has an explicit link to the full schedule with time and account labels.
 - Widget side padding is 10dp, top/bottom 8dp; title text is 10sp. Give busy weeks enough room before distributing remaining height. At smaller sizes reduce title capacity while preserving the count.
 - App week rows size to their actual title rows (minimum 48dp), reducing empty space while keeping date targets usable. Full event titles in the selected-day list may wrap.
 - Private supplied screenshots remain outside Git; publish only isolated emulator fixtures as verification evidence.
@@ -114,3 +114,12 @@
 - Close Naver credentials after verified calendar discovery. Schedule event/task loading independently of dialog composition; preserve existing data during same-account reconnect and display a quiet first-sync status.
 - Add a matching Google connection dialog with two readable cards: an existing device account or a new Google account. Keep email selection in the existing one-line picker.
 - Android account consent and Google sign-in remain provider-owned screens; never imitate Google credential entry inside MOA. Cancellation leaves the selected account unchanged.
+
+## Full app calendar and connected date ranges · v0.1.6
+- App month/week grids show all event entries without +N aggregation. Week rows grow with their schedules and the calendar remains scrollable. Short titles may ellipsize; the selected-day list retains full titles.
+- A single event spanning multiple dates is one horizontal bar per visible week, with its title once per segment. Never merge distinct events with matching titles.
+- Clip bars at week/month-view boundaries and mark continuation with chevrons. Timed events use local dates; all-day events use UTC dates. Exclusive midnight ends do not occupy the following day.
+- Share event placement between Compose and the native home widget. Overlapping events occupy separate lanes. The home widget retains at most 3 title rows plus accurate per-day +N counts and may reduce rows at small sizes.
+- Every date remains a click target, including inside a spanning bar. Widget entry must select the actual tapped date and retain cached events while syncing. Source colors and silent refresh remain unchanged.
+- Plan: lock date-span/overlap/overflow semantics with unit tests, implement shared placement, render app and widget, then inspect emulator screenshots and test widget navigation before build/push.
+- Foreground saves/deletes must not wait for remote refresh REPORTs. Serialize refreshes separately and reject responses/errors older than a successful local write, account change or disconnect. Google provider writes remain independent of Naver network work.

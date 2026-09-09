@@ -22,7 +22,7 @@ import com.moa.calendar.MainActivity
 import com.moa.calendar.R
 import com.moa.calendar.data.CalendarRepository
 import com.moa.calendar.data.CalendarSnapshot
-import com.moa.calendar.data.calendarDayPreview
+import com.moa.calendar.data.calendarWeekLayout
 import com.moa.calendar.data.calendarMonthLineCapacity
 import kotlin.math.ceil
 import kotlinx.coroutines.*
@@ -94,19 +94,31 @@ object WidgetUpdater {
         val fontScale = context.resources.configuration.fontScale.coerceAtLeast(1f)
         val lineHeight = ceil(14 * fontScale).toInt()
         val fixedHeight = 16 + 40 + 20 + ceil(28 * fontScale).toInt() + 8
-        val weekEventCounts = (0 until weeks).map { row ->
-            (0 until 7).maxOf { column -> snapshot.events.count { it.occursOn(start.plusDays((row * 7 + column).toLong())) } }
+        val weekLayouts = (0 until weeks).map { row -> calendarWeekLayout(snapshot.events, start.plusWeeks(row.toLong())) }
+        val capacity = calendarMonthLineCapacity(weekLayouts.map { it.rowCount }, height - fixedHeight, lineHeight)
+        val spanLayouts = intArrayOf(R.layout.widget_event_span_1, R.layout.widget_event_span_2, R.layout.widget_event_span_3,
+            R.layout.widget_event_span_4, R.layout.widget_event_span_5, R.layout.widget_event_span_6, R.layout.widget_event_span_7)
+        fun span(columns: Int, text: String = "", color: Int? = null): RemoteViews {
+            val entry = RemoteViews(context.packageName, spanLayouts[columns - 1])
+            entry.setTextViewText(R.id.widget_day_event, text)
+            entry.setTextColor(R.id.widget_day_event, Color.rgb(36, 42, 61))
+            if (color != null) {
+                fun tint(channel: Int) = (channel * .28 + 255 * .72).toInt()
+                entry.setInt(R.id.widget_day_event, "setBackgroundColor", Color.rgb(tint(Color.red(color)), tint(Color.green(color)), tint(Color.blue(color))))
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 31) entry.setViewLayoutHeight(R.id.widget_day_event, lineHeight.toFloat(), android.util.TypedValue.COMPLEX_UNIT_DIP)
+            return entry
         }
-        val capacity = calendarMonthLineCapacity(weekEventCounts, height - fixedHeight, lineHeight)
         repeat(weeks) { row ->
+            val weekStart = start.plusWeeks(row.toLong())
+            val layout = calendarWeekLayout(snapshot.events, weekStart, capacity)
             val week = RemoteViews(context.packageName, R.layout.widget_week)
+            val dates = RemoteViews(context.packageName, R.layout.widget_week_header)
             repeat(7) { column ->
-                val date = start.plusDays((row * 7 + column).toLong())
+                val date = weekStart.plusDays(column.toLong())
                 val cell = RemoteViews(context.packageName, R.layout.widget_month_day)
-                val dayEvents = snapshot.events.filter { it.occursOn(date) }.sortedWith(compareBy<com.moa.calendar.data.CalendarEvent> { !it.allDay }.thenBy { it.startMillis })
-                val count = dayEvents.size
+                val count = layout.eventCounts[column]
                 cell.setTextViewText(R.id.widget_day_text, "${date.dayOfMonth}" + if (capacity == 0 && count > 0) "·" else "")
-                cell.setContentDescription(R.id.widget_day_root, "${date.monthValue}월 ${date.dayOfMonth}일 일정 ${count}개" + dayEvents.joinToString(prefix = if (count > 0) ": " else "", separator = ", ") { it.title })
                 cell.setTextColor(R.id.widget_day_text, when {
                     date == today -> Color.WHITE
                     date.month != today.month -> Color.rgb(160, 167, 182)
@@ -115,27 +127,33 @@ object WidgetUpdater {
                     else -> Color.rgb(36, 42, 61)
                 })
                 if (date == today) cell.setInt(R.id.widget_day_text, "setBackgroundResource", R.drawable.widget_today)
-                cell.removeAllViews(R.id.widget_day_events)
-                val preview = calendarDayPreview(dayEvents, capacity)
-                preview.events.forEach { event ->
-                    val entry = RemoteViews(context.packageName, R.layout.widget_month_event)
-                    entry.setTextViewText(R.id.widget_day_event, event.title.replace('\n', ' '))
-                    entry.setTextColor(R.id.widget_day_event, Color.rgb(36, 42, 61))
-                    fun tint(channel: Int) = (channel * .28 + 255 * .72).toInt()
-                    entry.setInt(R.id.widget_day_event, "setBackgroundColor", Color.rgb(tint(Color.red(event.color)), tint(Color.green(event.color)), tint(Color.blue(event.color))))
-                    if (android.os.Build.VERSION.SDK_INT >= 31) entry.setViewLayoutHeight(R.id.widget_day_event, lineHeight.toFloat(), android.util.TypedValue.COMPLEX_UNIT_DIP)
-                    cell.addView(R.id.widget_day_events, entry)
+                dates.addView(R.id.widget_week_row, cell)
+                val hit = RemoteViews(context.packageName, R.layout.widget_date_hit)
+                val titles = snapshot.events.filter { it.occursOn(date) }.joinToString { it.title }
+                hit.setContentDescription(R.id.widget_date_hit, "${date.monthValue}월 ${date.dayOfMonth}일 일정 ${count}개" + if (count > 0) ": $titles" else "")
+                hit.setOnClickPendingIntent(R.id.widget_date_hit, open(context, date))
+                week.addView(R.id.widget_week_taps, hit)
+            }
+            week.addView(R.id.widget_week_content, dates)
+            repeat(layout.rowCount) { lane ->
+                val line = RemoteViews(context.packageName, R.layout.widget_event_lane)
+                var nextColumn = 0
+                layout.segments.filter { it.row == lane }.forEach { segment ->
+                    if (segment.startColumn > nextColumn) line.addView(R.id.widget_event_lane, span(segment.startColumn - nextColumn))
+                    line.addView(R.id.widget_event_lane, span(segment.endColumn - segment.startColumn + 1, segment.label(), segment.event.color))
+                    nextColumn = segment.endColumn + 1
                 }
-                if (capacity > 0 && preview.remaining > 0) {
-                    val more = RemoteViews(context.packageName, R.layout.widget_month_event)
-                    more.setTextViewText(R.id.widget_day_event, "+${preview.remaining}")
+                if (nextColumn < 7) line.addView(R.id.widget_event_lane, span(7 - nextColumn))
+                week.addView(R.id.widget_week_content, line)
+            }
+            if (capacity > 0 && layout.hiddenCounts.any { it > 0 }) {
+                val overflow = RemoteViews(context.packageName, R.layout.widget_event_lane)
+                layout.hiddenCounts.forEach { count ->
+                    val more = span(1, if (count > 0) "+$count" else "")
                     more.setTextColor(R.id.widget_day_event, Color.rgb(89, 101, 216))
-                    more.setContentDescription(R.id.widget_day_event, "일정 ${preview.remaining}개 더 보기")
-                    if (android.os.Build.VERSION.SDK_INT >= 31) more.setViewLayoutHeight(R.id.widget_day_event, lineHeight.toFloat(), android.util.TypedValue.COMPLEX_UNIT_DIP)
-                    cell.addView(R.id.widget_day_events, more)
+                    overflow.addView(R.id.widget_event_lane, more)
                 }
-                cell.setOnClickPendingIntent(R.id.widget_day_root, open(context, date))
-                week.addView(R.id.widget_week_row, cell)
+                week.addView(R.id.widget_week_content, overflow)
             }
             views.addView(R.id.widget_days, week)
         }

@@ -1,0 +1,1 @@
+Widget: tapped the Saturday half of the first spanning bar at (923, 660); date target bounds [859,590][987,884].

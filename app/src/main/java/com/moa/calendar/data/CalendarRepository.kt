@@ -48,22 +48,7 @@ class CalendarRepository internal constructor(context: Context, private val crea
     }
 
     suspend fun load(from: Long, to: Long, refreshRemote: Boolean = true, initialOnly: Boolean = false): CalendarSnapshot = withContext(Dispatchers.IO) {
-        if (refreshRemote) lock.withLock {
-            if (naverConnected() && (!initialOnly || initialNaverSyncPending())) {
-                try {
-                    val credentials = vault.read()
-                    val client = createClient(credentials.server, credentials.username, credentials.password)
-                    val window = SyncWindow.read(JSONObject(prefs.getString("remote", "{}")!!), from, to)
-                    val calendars = client.discover()
-                    val resources = calendars.associateWith { client.fetch(it, window.from, window.to) }
-                    resources.forEach { (calendar, data) -> data.forEach { IcsCodec.parse(it, calendar, window.from, window.to) } }
-                    storeRemote(calendars, resources, fetchTasks(client, calendars), window)
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    prefs.edit().putString("last_sync_error", (e.message ?: "네이버 연결을 확인해 주세요.") + " 저장된 일정을 표시합니다.").apply()
-                }
-            }
-        }
+        if (refreshRemote) refreshNaver(from, to, initialOnly)
         val deviceRead = deviceLock.withLock {
             if (!device.hasReadPermission()) {
                 prefs.edit().remove("device_cache").apply()
@@ -119,12 +104,42 @@ class CalendarRepository internal constructor(context: Context, private val crea
             state["naver_initial_sync"] == true)
     }
 
-    suspend fun connectNaver(username: String, password: String, server: String = "https://caldav.calendar.naver.com/") = withContext(Dispatchers.IO) {
-        lock.withLock {
-            val credentials = NaverCredentials(server.trim(), username.trim().removeSuffix("@naver.com"), password)
+    private suspend fun refreshNaver(from: Long, to: Long, initialOnly: Boolean) = syncLock.withLock {
+        var revision: Long? = null
+        try {
+            val request = lock.withLock {
+                if (!naverConnected() || (initialOnly && !initialNaverSyncPending())) null else {
+                    revision = remoteRevision
+                    vault.read() to SyncWindow.read(JSONObject(prefs.getString("remote", "{}")!!), from, to)
+                }
+            } ?: return@withLock
+            val (credentials, window) = request
             val client = createClient(credentials.server, credentials.username, credentials.password)
-            // Verify account access only. Event and task REPORTs belong to the background job.
+            // Slow REPORTs serialize only other refreshes, never foreground event writes.
             val calendars = client.discover()
+            val resources = calendars.associateWith { client.fetch(it, window.from, window.to) }
+            resources.forEach { (calendar, data) -> data.forEach { IcsCodec.parse(it, calendar, window.from, window.to) } }
+            val tasks = fetchTasks(client, calendars)
+            lock.withLock {
+                // A save/delete/reconnect after this read began makes its response stale.
+                if (remoteRevision == revision) storeRemote(calendars, resources, tasks, window)
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            lock.withLock {
+                if (remoteRevision == revision) prefs.edit().putString("last_sync_error",
+                    (e.message ?: "네이버 연결을 확인해 주세요.") + " 저장된 일정을 표시합니다.").apply()
+            }
+        }
+    }
+
+    suspend fun connectNaver(username: String, password: String, server: String = "https://caldav.calendar.naver.com/") = withContext(Dispatchers.IO) {
+        val credentials = NaverCredentials(server.trim(), username.trim().removeSuffix("@naver.com"), password)
+        val client = createClient(credentials.server, credentials.username, credentials.password)
+        // Verify account access only. Event and task REPORTs belong to the background job.
+        val calendars = client.discover()
+        lock.withLock {
+            remoteRevision++
             val previous = runCatching { vault.read() }.getOrNull()
             val sameAccount = previous?.username.equals(credentials.username, ignoreCase = true) &&
                 previous?.server?.trimEnd('/') == credentials.server.trimEnd('/')
@@ -141,48 +156,46 @@ class CalendarRepository internal constructor(context: Context, private val crea
 
     suspend fun disconnectNaver() = withContext(Dispatchers.IO) {
         lock.withLock {
+            remoteRevision++
             vault.clear()
             prefs.edit().remove("naver_account").remove("naver_initial_sync").remove("remote").remove("last_sync").remove("last_sync_error").remove("remote_tasks").remove("tasks_error").remove("tasks_checked").commit()
         }
     }
 
     suspend fun save(draft: EventDraft, existing: CalendarEvent? = null) = withContext(Dispatchers.IO) {
-        lock.withLock {
-            validateDraft(draft)
-            require(existing?.task != true) { "할 일 변경은 원본에서 해 주세요." }
-            require(existing == null || existing.calendarId == draft.calendarId) { "일정의 원본 캘린더는 변경할 수 없어요." }
-            when {
-                draft.calendarId.startsWith("device:") -> device.save(draft, existing)
-                else -> {
-                    val calendar = readCalendars().firstOrNull { it.id == draft.calendarId } ?: error("캘린더를 찾지 못했어요.")
-                    require(calendar.supportsEvents) { "할 일 전용 목록에는 일정을 저장할 수 없어요." }
-                    require(calendar.writable) { "읽기 전용 캘린더예요." }
-                    val credentials = vault.read()
-                    val client = createClient(credentials.server, credentials.username, credentials.password)
-                    val uid = UUID.randomUUID().toString()
-                    val href = existing?.href ?: "${calendar.id.trimEnd('/')}/$uid.ics"
-                    val ics = IcsCodec.write(draft, existing, uid)
-                    val etag = client.put(href, ics, existing?.etag)
-                    val resources = readResources(calendar.id).filterNot { it.href == href } + DavResource(href, etag, ics)
-                    updateResourceCache(calendar.id, resources)
-                }
-            }
+        validateDraft(draft)
+        require(existing?.task != true) { "할 일 변경은 원본에서 해 주세요." }
+        require(existing == null || existing.calendarId == draft.calendarId) { "일정의 원본 캘린더는 변경할 수 없어요." }
+        if (draft.calendarId.startsWith("device:")) {
+            deviceLock.withLock { device.save(draft, existing) }
+        } else lock.withLock {
+            val calendar = readCalendars().firstOrNull { it.id == draft.calendarId } ?: error("캘린더를 찾지 못했어요.")
+            require(calendar.supportsEvents) { "할 일 전용 목록에는 일정을 저장할 수 없어요." }
+            require(calendar.writable) { "읽기 전용 캘린더예요." }
+            val credentials = vault.read()
+            val client = createClient(credentials.server, credentials.username, credentials.password)
+            val uid = UUID.randomUUID().toString()
+            val href = existing?.href ?: "${calendar.id.trimEnd('/')}/$uid.ics"
+            val ics = IcsCodec.write(draft, existing, uid)
+            remoteRevision++
+            val etag = client.put(href, ics, existing?.etag)
+            val resources = readResources(calendar.id).filterNot { it.href == href } + DavResource(href, etag, ics)
+            updateResourceCache(calendar.id, resources)
         }
     }
 
     suspend fun delete(event: CalendarEvent) = withContext(Dispatchers.IO) {
-        lock.withLock {
-            require(!event.task) { "할 일 변경은 원본에서 해 주세요." }
-            require(!event.recurring) { "반복 일정은 원본 캘린더에서 삭제해 주세요." }
-            when (event.source) {
-                CalendarSource.GOOGLE, CalendarSource.DEVICE -> device.delete(event)
-                CalendarSource.NAVER -> {
-                    check(readCalendars().any { it.id == event.calendarId && it.writable }) { "읽기 전용 캘린더예요." }
-                    require(!event.rawIcs.contains("ATTENDEE", true) && !event.rawIcs.contains("ORGANIZER", true)) { "초대 일정은 원본 캘린더에서 삭제해 주세요." }
-                    val credentials = vault.read()
-                    createClient(credentials.server, credentials.username, credentials.password).delete(event.href, event.etag)
-                    updateResourceCache(event.calendarId, readResources(event.calendarId).filterNot { it.href == event.href })
-                }
+        require(!event.task) { "할 일 변경은 원본에서 해 주세요." }
+        require(!event.recurring) { "반복 일정은 원본 캘린더에서 삭제해 주세요." }
+        when (event.source) {
+            CalendarSource.GOOGLE, CalendarSource.DEVICE -> deviceLock.withLock { device.delete(event) }
+            CalendarSource.NAVER -> lock.withLock {
+                check(readCalendars().any { it.id == event.calendarId && it.writable }) { "읽기 전용 캘린더예요." }
+                require(!event.rawIcs.contains("ATTENDEE", true) && !event.rawIcs.contains("ORGANIZER", true)) { "초대 일정은 원본 캘린더에서 삭제해 주세요." }
+                val credentials = vault.read()
+                remoteRevision++
+                createClient(credentials.server, credentials.username, credentials.password).delete(event.href, event.etag)
+                updateResourceCache(event.calendarId, readResources(event.calendarId).filterNot { it.href == event.href })
             }
         }
     }
@@ -249,11 +262,13 @@ class CalendarRepository internal constructor(context: Context, private val crea
         val all = json.optJSONObject("resources") ?: JSONObject()
         all.put(id, resourceJson(resources))
         json.put("resources", all)
-        prefs.edit().putString("remote", json.toString()).commit()
+        check(prefs.edit().putString("remote", json.toString()).commit()) { "일정 캐시를 저장하지 못했어요." }
     }
 
     companion object {
         private val lock = Mutex()
+        private val syncLock = Mutex()
+        private var remoteRevision = 0L // Guarded by lock; in-flight reads never survive process death.
         private val deviceLock = Mutex()
     }
 }

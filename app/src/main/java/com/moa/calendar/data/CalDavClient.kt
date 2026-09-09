@@ -136,7 +136,7 @@ class CalDavClient(
     private fun request(url: HttpUrl, method: String, body: String?, headers: Map<String, String>, type: String = "application/xml; charset=utf-8", redirects: Int = 0): Pair<String, String> {
         val builder = Request.Builder().url(url).method(method, body?.toRequestBody(type.toMediaType()))
             .header("Authorization", Credentials.basic(username, password, Charsets.UTF_8))
-            .header("User-Agent", "MoaCalendar/0.1.5 (Android; CalDAV)")
+            .header("User-Agent", "MoaCalendar/0.1.6 (Android; CalDAV)")
         headers.forEach { (key, value) -> builder.header(key, value) }
         http.newCall(builder.build()).execute().use { response ->
             if (response.code in listOf(301, 302, 307, 308)) {

@@ -4,6 +4,9 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.app.job.JobScheduler
 import android.content.Intent
+import android.content.ContentValues
+import android.content.ContentUris
+import android.provider.CalendarContract
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
@@ -12,6 +15,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import com.moa.calendar.data.CalDavClient
 import com.moa.calendar.data.CalendarRepository
+import com.moa.calendar.data.DeviceCalendars
+import com.moa.calendar.data.EventDraft
+import com.moa.calendar.ui.EventEditor
 import com.moa.calendar.ui.MoaTheme
 import com.moa.calendar.ui.NaverDialog
 import com.moa.calendar.widget.CalendarSyncJob
@@ -37,6 +43,7 @@ internal class LoginRegression(private val runner: Instrumentation) {
     private val to = from + 86_400_000L
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var activity: MainActivity? = null
+    private var fixtureCalendar: android.net.Uri? = null
 
     fun run() {
         val result = Bundle()
@@ -76,11 +83,60 @@ internal class LoginRegression(private val runner: Instrumentation) {
                 check(cached.calendars.size == 1 && cached.initialNaverSync)
             }
             pass("verified login closes the real dialog while the first REPORT remains blocked; cached reads stay responsive")
+            // A slow background REPORT must not block either editor's foreground save.
+            val naverCalendar = runBlocking { repository.load(from, to, false).calendars.single() }
+            fun saveThroughEditor(calendar: com.moa.calendar.data.CalendarInfo, title: String) {
+                runner.runOnMainSync {
+                    activity!!.setContent { MoaTheme { key(calendar.id) {
+                        var open by remember { mutableStateOf(true) }
+                        if (open) EventEditor(LocalDate.now(), listOf(calendar), null, onDismiss = { open = false },
+                            onSave = { draft -> repository.save(draft); open = false }, onDelete = {})
+                        else Text("저장 완료")
+                    } } }
+                }
+                setField("일정 제목", title)
+                val began = SystemClock.uptimeMillis()
+                click("일정 저장")
+                await("저장 완료")
+                check(SystemClock.uptimeMillis() - began < 2500) { "Save waited for background REPORT." }
+                check(http.releaseReports.count == 1L) { "Save was not tested during blocked REPORT." }
+            }
+            saveThroughEditor(naverCalendar, "NaverSavedDuringSync")
+            val fixtureAccount = "moa-save-fixture@example.test"
+            val syncUri = CalendarContract.Calendars.CONTENT_URI.buildUpon()
+                .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, fixtureAccount)
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, "com.google").build()
+            fixtureCalendar = checkNotNull(context.contentResolver.insert(syncUri, ContentValues().apply {
+                put(CalendarContract.Calendars.ACCOUNT_NAME, fixtureAccount)
+                put(CalendarContract.Calendars.ACCOUNT_TYPE, "com.google")
+                put(CalendarContract.Calendars.NAME, "Save fixture")
+                put(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, "Save fixture")
+                put(CalendarContract.Calendars.OWNER_ACCOUNT, fixtureAccount)
+                put(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL, CalendarContract.Calendars.CAL_ACCESS_OWNER)
+                put(CalendarContract.Calendars.CALENDAR_TIME_ZONE, "UTC")
+                put(CalendarContract.Calendars.SYNC_EVENTS, 1)
+                put(CalendarContract.Calendars.VISIBLE, 1)
+            }))
+            val deviceId = "device:${ContentUris.parseId(fixtureCalendar!!)}"
+            val googleCalendar = DeviceCalendars(context).calendars().single { it.id == deviceId }
+            saveThroughEditor(googleCalendar, "GoogleSavedDuringSync")
+            runBlocking {
+                val saved = repository.load(from, to, false)
+                check(saved.events.any { it.title == "NaverSavedDuringSync" })
+                check(saved.events.any { it.title == "GoogleSavedDuringSync" })
+            }
+            context.contentResolver.delete(fixtureCalendar!!, null, null)
+            fixtureCalendar = null
+            pass("real Naver and Google-provider event editors save and close within 2.5 seconds while REPORT stays blocked")
             context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             http.releaseReports.countDown()
             runBlocking { withTimeout(15_000) { checkNotNull(sync).await() } }
             runBlocking {
-                val ready = repository.load(from, to, false)
+                val afterStale = repository.load(from, to, false)
+                check(afterStale.events.any { it.title == "NaverSavedDuringSync" })
+                check(repository.initialNaverSyncPending()) { "Stale REPORT was published after the save." }
+                val ready = repository.load(from, to, initialOnly = true)
                 check(ready.events.any { it.title == "LoginFixtureEvent" })
                 check(ready.tasks.any { it.title == "LoginFixtureTask" })
                 check(!ready.initialNaverSync && !repository.initialNaverSyncPending())
@@ -120,6 +176,27 @@ internal class LoginRegression(private val runner: Instrumentation) {
                 check(repository.selectedGoogleAccount() == "fixture-google@example.test")
                 pass("switching Naver account removes only the old Naver cache and preserves Google selection")
 
+                val current = repository.load(from, to, initialOnly = true)
+                val created = current.events.single { it.title == "NaverSavedDuringSync" }
+                http.reportEntered = CountDownLatch(1); http.releaseReports = CountDownLatch(1)
+                val beforeDelete = scope.async { repository.load(from, to) }
+                check(http.reportEntered.await(10, TimeUnit.SECONDS))
+                withTimeout(2500) { scope.async { repository.delete(created) }.await() }
+                http.releaseReports.countDown(); beforeDelete.await()
+                check(repository.load(from, to, false).events.none { it.id == created.id })
+                pass("delete proceeds during REPORT; an older response cannot resurrect the deleted event")
+
+                http.reportEntered = CountDownLatch(1); http.releaseReports = CountDownLatch(1)
+                http.failReports = true
+                val beforeDisconnect = scope.async { repository.load(from, to) }
+                check(http.reportEntered.await(10, TimeUnit.SECONDS))
+                withTimeout(2500) { scope.async { repository.disconnectNaver() }.await() }
+                http.releaseReports.countDown(); beforeDisconnect.await()
+                check(!repository.naverConnected() && !prefs.contains("remote") && !prefs.contains("last_sync_error"))
+                http.failReports = false
+                repository.connectNaver("other-user", "fixture-password", FixtureHttp.SERVER)
+                pass("disconnect proceeds during REPORT; stale results and errors cannot restore the old account")
+
                 // Register while holding the production sync lock, inspect then cancel before any network can run.
                 val mutex = CalendarRepository::class.java.getDeclaredField("lock").apply { isAccessible = true }.get(null) as kotlinx.coroutines.sync.Mutex
                 mutex.lock()
@@ -138,6 +215,7 @@ internal class LoginRegression(private val runner: Instrumentation) {
             result.putString("failure", e.javaClass.simpleName)
         } finally {
             http.releaseReports.countDown()
+            fixtureCalendar?.let { context.contentResolver.delete(it, null, null) }
             runBlocking { scope.coroutineContext[Job]?.cancelAndJoin() }
             activity?.let { runner.runOnMainSync { it.finish() } }
             if (safeToRestore) {
@@ -176,9 +254,14 @@ internal class LoginRegression(private val runner: Instrumentation) {
         error("Missing UI: $text")
     }
     private fun click(text: String) {
-        var node: AccessibilityNodeInfo? = await(text)
-        while (node != null && !node.isClickable) node = node.parent
-        check(node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
+        val deadline = SystemClock.uptimeMillis() + 5000
+        do {
+            var node: AccessibilityNodeInfo? = await(text)
+            while (node != null && !node.isClickable) node = node.parent
+            if (node?.isEnabled == true && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return
+            SystemClock.sleep(100)
+        } while (SystemClock.uptimeMillis() < deadline)
+        error("Cannot click $text")
     }
     private fun setField(label: String, value: String) {
         var node: AccessibilityNodeInfo? = await(label)
@@ -195,20 +278,29 @@ private class FixtureHttp : Interceptor {
     @Volatile var failAuthentication = false
     @Volatile var failReports = false
     val reports = AtomicInteger()
-    val reportEntered = CountDownLatch(1)
-    val releaseReports = CountDownLatch(1)
+    private val saved = java.util.concurrent.ConcurrentHashMap<String, String>()
+    @Volatile var reportEntered = CountDownLatch(1)
+    @Volatile var releaseReports = CountDownLatch(1)
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val code: Int
         val body: String
         if (request.method == "PROPFIND") {
             code = if (failAuthentication) 401 else 207
-            body = """<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/calendar/</d:href><d:propstat><d:prop><d:resourcetype><c:calendar/></d:resourcetype><d:displayname>Login fixture</d:displayname><c:supported-calendar-component-set><c:comp name="VEVENT"/><c:comp name="VTODO"/></c:supported-calendar-component-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"""
+            body = """<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/calendar/</d:href><d:propstat><d:prop><d:resourcetype><c:calendar/></d:resourcetype><d:displayname>Login fixture</d:displayname><d:current-user-privilege-set><d:privilege><d:write/></d:privilege></d:current-user-privilege-set><c:supported-calendar-component-set><c:comp name="VEVENT"/><c:comp name="VTODO"/></c:supported-calendar-component-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"""
+        } else if (request.method == "PUT") {
+            val buffer = Buffer(); request.body!!.writeTo(buffer)
+            saved[request.url.encodedPath] = buffer.readUtf8()
+            code = 201; body = ""
+        } else if (request.method == "DELETE") {
+            saved.remove(request.url.encodedPath)
+            code = 204; body = ""
         } else {
             check(request.method == "REPORT")
+            val prior = saved.toMap()
             reports.incrementAndGet()
             reportEntered.countDown()
-            if (blockReports) check(releaseReports.await(15, TimeUnit.SECONDS)) { "Fixture REPORT timed out." }
+            if (blockReports) check(releaseReports.await(40, TimeUnit.SECONDS)) { "Fixture REPORT timed out." }
             val buffer = Buffer()
             request.body!!.writeTo(buffer)
             val task = buffer.readUtf8().contains("VTODO")
@@ -216,9 +308,12 @@ private class FixtureHttp : Interceptor {
             val ics = if (task) "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:task\r\nSUMMARY:LoginFixtureTask\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
                 else "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:event\r\nDTSTART;VALUE=DATE:$date\r\nSUMMARY:LoginFixtureEvent\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
             code = if (failReports) 503 else 207
-            body = """<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/calendar/${if (task) "task" else "event"}.ics</d:href><d:propstat><d:prop><d:getetag>"fixture"</d:getetag><c:calendar-data><![CDATA[$ics]]></c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"""
+            val entries = (mapOf("/calendar/${if (task) "task" else "event"}.ics" to ics) + if (task) emptyMap() else prior).entries.joinToString("") { (href, data) ->
+                """<d:response><d:href>$href</d:href><d:propstat><d:prop><d:getetag>"fixture"</d:getetag><c:calendar-data><![CDATA[$data]]></c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
+            }
+            body = """<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">$entries</d:multistatus>"""
         }
-        return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code).message("Fixture")
+        return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code).message("Fixture").header("ETag", "\"fixture\"")
             .body(body.toResponseBody("application/xml".toMediaType())).build()
     }
 }

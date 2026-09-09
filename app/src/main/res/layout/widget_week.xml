@@ -1,1 +1,4 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_week_row" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="horizontal" android:gravity="center" />
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_weight="1">
+    <LinearLayout android:id="@+id/widget_week_content" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+    <LinearLayout android:id="@+id/widget_week_taps" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="horizontal" />
+</FrameLayout>

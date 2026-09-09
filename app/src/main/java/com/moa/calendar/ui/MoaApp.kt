@@ -414,41 +414,68 @@ import java.util.Locale
                 color = when (i) { 0 -> Color(0xFFD89292); 6 -> Color(0xFF8A9ED0); else -> Muted })
         }
     }
-    repeat(weeks) { row ->
-        val titleRows = (0 until 7).maxOf { column ->
-            events.count { it.occursOn(gridStart.plusDays((row * 7 + column).toLong())) }.coerceAtMost(4)
-        }
-        val rowHeight = if (showTitles) maxOf(48f, 32 + 16 * fontScale * titleRows).dp else 48.dp
-        Row(Modifier.fillMaxWidth()) {
-            repeat(7) { column ->
-                val date = gridStart.plusDays((row * 7 + column).toLong())
-                val dayEvents = events.filter { it.occursOn(date) }
-                val isSelected = date == selected
-                val isToday = date == LocalDate.now()
-                val inMonth = YearMonth.from(date) == month
-                Column(Modifier.weight(1f).height(rowHeight).clip(RoundedCornerShape(12.dp)).clickable { onDate(date) }
-                    .semantics { contentDescription = "${date.monthValue}월 ${date.dayOfMonth}일, 일정 ${dayEvents.size}개" + dayEvents.joinToString(prefix = if (dayEvents.isEmpty()) "" else ": ") { it.title } }, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(11.dp)).background(if (isSelected) Accent else if (isToday) AccentWash else Color.Transparent), contentAlignment = Alignment.Center) {
-                        Text(date.dayOfMonth.toString(), fontSize = 13.sp, fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
-                            color = when { isSelected -> Color.White; !inMonth -> Color(0xFFCDD1DC); isToday -> Accent; column == 0 -> Color(0xFFD88585); column == 6 -> Color(0xFF7892C4); else -> Ink })
-                    }
-                    Spacer(Modifier.height(3.dp))
-                    if (showTitles) {
-                        val preview = calendarDayPreview(dayEvents)
-                        preview.events.forEach { event ->
-                            Text(event.title.replace('\n', ' '),
-                                Modifier.fillMaxWidth().padding(horizontal = 1.dp).background(Color(event.color).copy(alpha = .20f)).padding(horizontal = 2.dp),
-                                fontSize = 10.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Spacer(Modifier.height(1.dp))
-                        }
-                        if (preview.remaining > 0) Text("+${preview.remaining}", Modifier.fillMaxWidth().padding(horizontal = 3.dp),
-                            fontSize = 10.sp, lineHeight = 14.sp, color = Accent, fontWeight = FontWeight.SemiBold)
-                    } else if (inMonth || weekOnly) {
-                        dayEvents.take(2).forEach { event ->
-                            Box(Modifier.width(24.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color(event.color).copy(alpha = .72f)))
-                            Spacer(Modifier.height(3.dp))
+    val zone = ZoneId.systemDefault()
+    val layouts = remember(events, gridStart, weeks, zone) {
+        (0 until weeks).map { calendarWeekLayout(events, gridStart.plusWeeks(it.toLong()), zone = zone) }
+    }
+    layouts.forEachIndexed { index, layout ->
+        val weekStart = gridStart.plusWeeks(index.toLong())
+        val rowHeight = if (showTitles) maxOf(48f, 32 + 16 * fontScale * layout.rowCount).dp else 48.dp
+        Box(Modifier.fillMaxWidth().height(rowHeight)) {
+            Column {
+                Row(Modifier.fillMaxWidth()) {
+                    repeat(7) { column ->
+                        val date = weekStart.plusDays(column.toLong())
+                        val isSelected = date == selected
+                        val isToday = date == LocalDate.now()
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
+                            Box(Modifier.size(28.dp).clip(RoundedCornerShape(11.dp))
+                                .background(if (isSelected) Accent else if (isToday) AccentWash else Color.Transparent), contentAlignment = Alignment.Center) {
+                                Text(date.dayOfMonth.toString(), fontSize = 13.sp, fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
+                                    color = when { isSelected -> Color.White; YearMonth.from(date) != month -> Color(0xFFCDD1DC); isToday -> Accent; column == 0 -> Color(0xFFD88585); column == 6 -> Color(0xFF7892C4); else -> Ink })
+                            }
                         }
                     }
+                }
+                Spacer(Modifier.height(3.dp))
+                if (showTitles) {
+                    repeat(layout.rowCount) { lane ->
+                        Row(Modifier.fillMaxWidth().height((16 * fontScale).dp)) {
+                            var nextColumn = 0
+                            layout.segments.filter { it.row == lane }.forEach { segment ->
+                                if (segment.startColumn > nextColumn) Spacer(Modifier.weight((segment.startColumn - nextColumn).toFloat()))
+                                val shape = RoundedCornerShape(
+                                    topStart = if (segment.continuesBefore) 0.dp else 3.dp,
+                                    bottomStart = if (segment.continuesBefore) 0.dp else 3.dp,
+                                    topEnd = if (segment.continuesAfter) 0.dp else 3.dp,
+                                    bottomEnd = if (segment.continuesAfter) 0.dp else 3.dp)
+                                Text(segment.label(), Modifier.weight((segment.endColumn - segment.startColumn + 1).toFloat())
+                                    .padding(horizontal = 1.dp).clip(shape).background(Color(segment.event.color).copy(alpha = .20f)).padding(horizontal = 2.dp),
+                                    fontSize = 10.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                nextColumn = segment.endColumn + 1
+                            }
+                            if (nextColumn < 7) Spacer(Modifier.weight((7 - nextColumn).toFloat()))
+                        }
+                    }
+                } else Row(Modifier.fillMaxWidth()) {
+                    repeat(7) { column ->
+                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            layout.segments.filter { column in it.startColumn..it.endColumn }.take(2).forEach { segment ->
+                                Box(Modifier.width(24.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color(segment.event.color).copy(alpha = .72f)))
+                                Spacer(Modifier.height(3.dp))
+                            }
+                        }
+                    }
+                }
+            }
+            // Date targets cover the whole week, including the middle of a spanning event bar.
+            Row(Modifier.matchParentSize()) {
+                repeat(7) { column ->
+                    val date = weekStart.plusDays(column.toLong())
+                    val dayEvents = layout.segments.filter { column in it.startColumn..it.endColumn }
+                    Box(Modifier.weight(1f).fillMaxHeight().clickable { onDate(date) }
+                        .semantics { contentDescription = "${date.monthValue}월 ${date.dayOfMonth}일, 일정 ${layout.eventCounts[column]}개" +
+                            dayEvents.joinToString(prefix = if (dayEvents.isEmpty()) "" else ": ") { it.event.title } })
                 }
             }
         }

@@ -10,8 +10,8 @@ android {
         applicationId = "com.moa.calendar"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
         testInstrumentationRunner = "com.moa.calendar.RefreshRegressionRunner"
     }
     buildFeatures { compose = true }

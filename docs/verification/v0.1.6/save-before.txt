@@ -1,0 +1,9 @@
+Expected failure on unmodified v0.1.5 with blocked REPORT (negative control):
+PASS: verified login closes the real dialog while the first REPORT remains blocked; cached reads stay responsive.
+FAIL: IllegalStateException: Missing UI: 저장 완료
+java.lang.IllegalStateException: Missing UI: 저장 완료
+	at com.moa.calendar.LoginRegression.await(LoginRegression.kt:233)
+	at com.moa.calendar.LoginRegression.run$saveThroughEditor(LoginRegression.kt:100)
+	at com.moa.calendar.LoginRegression.run(LoginRegression.kt:104)
+	at com.moa.calendar.RefreshRegressionRunner.onStart(RefreshRegressionRunner.kt:29)
+	at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2594)
