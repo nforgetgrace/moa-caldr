@@ -109,3 +109,8 @@
 - Keep the v0.1.3 widget typography/padding, source colors, silent refresh and recent-activity navigation behavior.
 - Keep the last complete device-calendar snapshot on query failure. Clear it when calendar permission is revoked, and accept successful empty results. Background refresh must not narrow previously cached dates.
 - A partial CalDAV collection listing is an error, not evidence that calendars were deleted.
+
+## Login and account connection · v0.1.5
+- Close Naver credentials after verified calendar discovery. Schedule event/task loading independently of dialog composition; preserve existing data during same-account reconnect and display a quiet first-sync status.
+- Add a matching Google connection dialog with two readable cards: an existing device account or a new Google account. Keep email selection in the existing one-line picker.
+- Android account consent and Google sign-in remain provider-owned screens; never imitate Google credential entry inside MOA. Cancellation leaves the selected account unchanged.

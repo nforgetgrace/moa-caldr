@@ -11,15 +11,14 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyStore
-import java.time.LocalDate
-import java.time.ZoneId
 import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-class CalendarRepository(context: Context) {
+class CalendarRepository internal constructor(context: Context, private val createClient: (String, String, String) -> CalDavClient) {
+    constructor(context: Context) : this(context, { server, username, password -> CalDavClient(server, username, password) })
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("moa_calendar", Context.MODE_PRIVATE)
     private val device = DeviceCalendars(app)
@@ -39,6 +38,7 @@ class CalendarRepository(context: Context) {
         prefs.edit().apply { if (account == null) remove("google_account") else putString("google_account", account) }.apply()
     }
     fun naverConnected(): Boolean = vault.exists()
+    fun initialNaverSyncPending(): Boolean = naverConnected() && prefs.getBoolean("naver_initial_sync", false)
     fun naverAccount(): String = prefs.getString("naver_account", "").orEmpty()
     fun hiddenCalendars(): Set<String> = prefs.getStringSet("hidden", emptySet()).orEmpty().toSet()
     fun setVisible(id: String, visible: Boolean) {
@@ -47,12 +47,12 @@ class CalendarRepository(context: Context) {
         prefs.edit().putStringSet("hidden", hidden).apply()
     }
 
-    suspend fun load(from: Long, to: Long, refreshRemote: Boolean = true): CalendarSnapshot = withContext(Dispatchers.IO) {
+    suspend fun load(from: Long, to: Long, refreshRemote: Boolean = true, initialOnly: Boolean = false): CalendarSnapshot = withContext(Dispatchers.IO) {
         if (refreshRemote) lock.withLock {
-            if (naverConnected()) {
+            if (naverConnected() && (!initialOnly || initialNaverSyncPending())) {
                 try {
                     val credentials = vault.read()
-                    val client = CalDavClient(credentials.server, credentials.username, credentials.password)
+                    val client = createClient(credentials.server, credentials.username, credentials.password)
                     val window = SyncWindow.read(JSONObject(prefs.getString("remote", "{}")!!), from, to)
                     val calendars = client.discover()
                     val resources = calendars.associateWith { client.fetch(it, window.from, window.to) }
@@ -115,28 +115,34 @@ class CalendarRepository(context: Context) {
         }
         CalendarSnapshot(deviceCalendars + remoteCalendars, (deviceEvents + remoteEvents + datedTasks).sortedBy { it.startMillis },
             state["last_sync"] as? Long ?: 0, errors, allDeviceCalendars.filter { it.source == CalendarSource.GOOGLE }.map { it.account }.distinct().sorted(),
-            tasks, taskNotice, runCatching { device.googleSyncNotice(account) }.getOrElse { "기기 계정 동기화 상태를 확인할 수 없어요." })
+            tasks, taskNotice, runCatching { device.googleSyncNotice(account) }.getOrElse { "기기 계정 동기화 상태를 확인할 수 없어요." },
+            state["naver_initial_sync"] == true)
     }
 
     suspend fun connectNaver(username: String, password: String, server: String = "https://caldav.calendar.naver.com/") = withContext(Dispatchers.IO) {
         lock.withLock {
             val credentials = NaverCredentials(server.trim(), username.trim().removeSuffix("@naver.com"), password)
-            val client = CalDavClient(credentials.server, credentials.username, credentials.password)
+            val client = createClient(credentials.server, credentials.username, credentials.password)
+            // Verify account access only. Event and task REPORTs belong to the background job.
             val calendars = client.discover()
-            val today = LocalDate.now()
-            val from = today.minusMonths(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            val to = today.plusMonths(3).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            val resources = calendars.associateWith { client.fetch(it, from, to) }
-            resources.forEach { (c, data) -> data.forEach { IcsCodec.parse(it, c, from, to) } }
+            val previous = runCatching { vault.read() }.getOrNull()
+            val sameAccount = previous?.username.equals(credentials.username, ignoreCase = true) &&
+                previous?.server?.trimEnd('/') == credentials.server.trimEnd('/')
             vault.save(credentials)
-            storeRemote(calendars, resources, fetchTasks(client, calendars), SyncWindow(from, to), credentials.username)
+            val editor = prefs.edit().putString("naver_account", credentials.username)
+                .putBoolean("naver_initial_sync", true).remove("last_sync_error")
+            if (!sameAccount || !prefs.contains("remote")) {
+                editor.putString("remote", JSONObject().put("calendars", calendarJson(calendars)).put("resources", JSONObject()).toString())
+                    .remove("remote_tasks").remove("last_sync").remove("tasks_checked").remove("tasks_error")
+            }
+            check(editor.commit()) { "연결 정보를 저장하지 못했어요." }
         }
     }
 
     suspend fun disconnectNaver() = withContext(Dispatchers.IO) {
         lock.withLock {
             vault.clear()
-            prefs.edit().remove("naver_account").remove("remote").remove("last_sync").remove("last_sync_error").remove("remote_tasks").remove("tasks_error").remove("tasks_checked").commit()
+            prefs.edit().remove("naver_account").remove("naver_initial_sync").remove("remote").remove("last_sync").remove("last_sync_error").remove("remote_tasks").remove("tasks_error").remove("tasks_checked").commit()
         }
     }
 
@@ -152,7 +158,7 @@ class CalendarRepository(context: Context) {
                     require(calendar.supportsEvents) { "할 일 전용 목록에는 일정을 저장할 수 없어요." }
                     require(calendar.writable) { "읽기 전용 캘린더예요." }
                     val credentials = vault.read()
-                    val client = CalDavClient(credentials.server, credentials.username, credentials.password)
+                    val client = createClient(credentials.server, credentials.username, credentials.password)
                     val uid = UUID.randomUUID().toString()
                     val href = existing?.href ?: "${calendar.id.trimEnd('/')}/$uid.ics"
                     val ics = IcsCodec.write(draft, existing, uid)
@@ -174,7 +180,7 @@ class CalendarRepository(context: Context) {
                     check(readCalendars().any { it.id == event.calendarId && it.writable }) { "읽기 전용 캘린더예요." }
                     require(!event.rawIcs.contains("ATTENDEE", true) && !event.rawIcs.contains("ORGANIZER", true)) { "초대 일정은 원본 캘린더에서 삭제해 주세요." }
                     val credentials = vault.read()
-                    CalDavClient(credentials.server, credentials.username, credentials.password).delete(event.href, event.etag)
+                    createClient(credentials.server, credentials.username, credentials.password).delete(event.href, event.etag)
                     updateResourceCache(event.calendarId, readResources(event.calendarId).filterNot { it.href == event.href })
                 }
             }
@@ -220,14 +226,15 @@ class CalendarRepository(context: Context) {
     private fun resourceJson(resources: List<DavResource>) = JSONArray().apply {
         resources.forEach { put(JSONObject().put("href", it.href).put("etag", it.etag).put("ics", it.ics)) }
     }
-    private fun storeRemote(calendars: List<CalendarInfo>, resources: Map<CalendarInfo, List<DavResource>>,
-        tasks: Result<Map<CalendarInfo, List<DavResource>>>, window: SyncWindow, account: String? = null) {
-        val json = JSONObject().put("from", window.from).put("to", window.to).put("calendars", JSONArray().apply { calendars.forEach {
+    private fun calendarJson(calendars: List<CalendarInfo>) = JSONArray().apply { calendars.forEach {
             put(JSONObject().put("id", it.id).put("name", it.name).put("account", it.account).put("color", it.color).put("writable", it.writable).put("events", it.supportsEvents).put("tasks", it.supportsTasks))
-        } }).put("resources", JSONObject().apply { resources.forEach { (calendar, data) -> put(calendar.id, resourceJson(data)) } })
+    } }
+    private fun storeRemote(calendars: List<CalendarInfo>, resources: Map<CalendarInfo, List<DavResource>>,
+        tasks: Result<Map<CalendarInfo, List<DavResource>>>, window: SyncWindow) {
+        val json = JSONObject().put("from", window.from).put("to", window.to).put("calendars", calendarJson(calendars))
+            .put("resources", JSONObject().apply { resources.forEach { (calendar, data) -> put(calendar.id, resourceJson(data)) } })
         val editor = prefs.edit().putString("remote", json.toString())
-            .putLong("last_sync", System.currentTimeMillis()).remove("last_sync_error")
-        if (account != null) editor.putString("naver_account", account)
+            .putLong("last_sync", System.currentTimeMillis()).remove("last_sync_error").remove("naver_initial_sync")
         tasks.fold(onSuccess = { data ->
             val taskJson = JSONObject().apply { data.forEach { (calendar, items) -> put(calendar.id, resourceJson(items)) } }
             editor.putString("remote_tasks", taskJson.toString()).putBoolean("tasks_checked", true).remove("tasks_error")

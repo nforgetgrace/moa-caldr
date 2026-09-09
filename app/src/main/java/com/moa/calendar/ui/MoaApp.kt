@@ -3,6 +3,7 @@ package com.moa.calendar.ui
 import android.Manifest
 import android.accounts.Account
 import android.accounts.AccountManager
+import android.accounts.OperationCanceledException
 import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
@@ -75,6 +76,9 @@ import java.util.Locale
     var taskView by rememberSaveable { mutableStateOf(false) }
     var selectedTask by remember { mutableStateOf<CalendarTask?>(null) }
     var showGoogle by remember { mutableStateOf(false) }
+    var showGoogleConnect by rememberSaveable { mutableStateOf(false) }
+    var addingGoogle by remember { mutableStateOf(false) }
+    var googleConnectError by remember { mutableStateOf("") }
     var selectedGoogleAccount by remember { mutableStateOf(repository.selectedGoogleAccount()) }
     var hasCalendarPermission by remember { mutableStateOf(DeviceCalendars(context).hasReadPermission()) }
     var showNaver by remember { mutableStateOf(false) }
@@ -115,14 +119,17 @@ import java.util.Locale
             revision++; manualRefreshRevision = revision
         }
     }
+    fun selectGoogle(account: String?) {
+        repository.selectGoogleAccount(account); selectedGoogleAccount = account
+        snapshot = snapshot.forGoogleAccount(account)
+        revision++; showGoogle = false; showGoogleConnect = false
+        if (account != null) requestGoogleSync()
+    }
     val accountLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val name = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
         val type = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_TYPE)
         if (result.resultCode == Activity.RESULT_OK && type == "com.google" && !name.isNullOrBlank()) {
-            repository.selectGoogleAccount(name); selectedGoogleAccount = name
-            snapshot = snapshot.forGoogleAccount(name)
-            revision++; showGoogle = false
-            requestGoogleSync()
+            selectGoogle(name)
         }
     }
     val now = LocalDate.now()
@@ -132,6 +139,7 @@ import java.util.Locale
     val naverConnected = repository.naverConnected()
     // Provider/cache notifications only reread local data; they never trigger another network sync.
     LaunchedEffect(monthString, externalRevision) {
+        selectedGoogleAccount = repository.selectedGoogleAccount()
         hasCalendarPermission = DeviceCalendars(context).hasReadPermission()
         try {
             snapshot = repository.load(from, to, false)
@@ -258,28 +266,50 @@ import java.util.Locale
             }
         }
     }
-    if (showGoogle) GoogleAccountDialog(snapshot.googleAccounts, selectedGoogleAccount,
+    if (showGoogle && !showGoogleConnect) GoogleAccountDialog(snapshot.googleAccounts, selectedGoogleAccount,
         onDismiss = { showGoogle = false },
-        onSelect = { account ->
-            repository.selectGoogleAccount(account); selectedGoogleAccount = account
-            snapshot = snapshot.forGoogleAccount(account)
-            revision++; showGoogle = false
-            if (account != null) requestGoogleSync()
-        },
-        onAddAccount = {
+        onSelect = ::selectGoogle,
+        onAddAccount = { googleConnectError = ""; showGoogleConnect = true })
+    if (showGoogleConnect) GoogleConnectDialog(
+        onDismiss = { if (!addingGoogle) { showGoogleConnect = false; showGoogle = true } },
+        onExistingAccount = {
+            googleConnectError = ""
             val selectedAccount = selectedGoogleAccount?.let { Account(it, "com.google") }
             val chooser = AccountManager.newChooseAccountIntent(selectedAccount, null, arrayOf("com.google"), "모아에서 사용할 Google 계정", null, null, null)
             runCatching { accountLauncher.launch(chooser) }.onFailure {
                 runCatching { context.startActivity(Intent(Settings.ACTION_ADD_ACCOUNT).putExtra(Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google"))) }
-                    .onFailure { message("Android 설정 → 계정에서 Google 계정을 추가해 주세요.") }
+                    .onFailure { googleConnectError = "Android 설정 → 계정에서 Google 계정을 추가해 주세요." }
             }
-        })
+        },
+        onNewAccount = {
+            addingGoogle = true
+            googleConnectError = ""
+            try {
+                AccountManager.get(context).addAccount("com.google", null, null, null, context as Activity, { future ->
+                    addingGoogle = false
+                    try {
+                        val result = future.result
+                        val name = result.getString(AccountManager.KEY_ACCOUNT_NAME)
+                        if (result.getString(AccountManager.KEY_ACCOUNT_TYPE) == "com.google" && !name.isNullOrBlank()) selectGoogle(name)
+                        else { showGoogleConnect = false; showGoogle = true; revision++ }
+                    } catch (_: OperationCanceledException) { /* Cancellation keeps the selected account. */ }
+                    catch (_: Exception) { googleConnectError = "Google 로그인 화면을 열지 못했어요. 기기의 Google 계정 설정을 확인해 주세요." }
+                }, null)
+            } catch (_: Exception) {
+                addingGoogle = false
+                googleConnectError = "Google 로그인 화면을 열지 못했어요. 기기의 Google 계정 설정을 확인해 주세요."
+            }
+        }, busy = addingGoogle, error = googleConnectError)
     if (showEditor) EventEditor(selected, snapshot.calendars.filter { it.supportsEvents && it.syncEnabled }, editing, onDismiss = { showEditor = false },
         onSave = { draft -> repository.save(draft, editing); showEditor = false; select(Instant.ofEpochMilli(draft.startMillis).atZone(if (draft.allDay) ZoneId.of("UTC") else ZoneId.systemDefault()).toLocalDate()); revision++; message("일정을 저장했어요.") },
         onDelete = { editing?.let { repository.delete(it) }; showEditor = false; revision++; message("일정을 삭제했어요.") })
     selectedTask?.let { task -> TaskDialog(task, snapshot.calendars.firstOrNull { it.id == task.calendarId }, onDismiss = { selectedTask = null }) }
     if (showNaver) NaverDialog(onDismiss = { showNaver = false }) { username, password ->
-        repository.connectNaver(username, password); CalendarSyncJob.schedule(context); showNaver = false; revision++; message("네이버 캘린더가 연결됐어요.")
+        repository.connectNaver(username, password)
+        showNaver = false
+        CalendarSyncJob.scheduleInitial(context, from, to)
+        CalendarSyncJob.schedule(context)
+        message("네이버 계정이 연결됐어요. 일정은 백그라운드에서 가져옵니다.")
     }
 }
 

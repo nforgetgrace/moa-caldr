@@ -1,0 +1,8 @@
+Google 계정 연결 [89,875][865,955] clickable=false
+선택 창 닫기 [900,887][958,945] clickable=false
+어떤 계정을 연결할까요? [89,983][410,1028] clickable=false
+기기에 있는 계정 [268,1112][540,1168] clickable=false
+휴대폰의 계정을 선택해요. [268,1181][612,1229] clickable=false
+새 Google 계정 추가 [268,1334][602,1390] clickable=false
+새 계정으로 로그인해요. [268,1403][583,1451] clickable=false
+다음 단계는 Android · Google 화면에서 진행됩니다. [94,1530][701,1575] clickable=false

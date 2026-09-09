@@ -48,6 +48,7 @@ import java.time.format.DateTimeFormatter
         Spacer(Modifier.height(7.dp))
         AccountCard("N", Color(0xFF03A86B), "NAVER Calendar", if (naverConnected) "$naverAccount · 연결됨" else "CalDAV로 개인 일정을 연결하세요",
             if (naverConnected) "연결 다시 설정" else "계정 연결", onNaver)
+        if (snapshot.initialNaverSync) Text("로그인 완료 · 일정은 백그라운드에서 가져옵니다.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 9.dp))
         Text("네이버의 Android CalDAV는 공식 지원 대상이 아니며, 실제 연결 확인이 필요해요.", fontSize = 11.sp, color = Muted, modifier = Modifier.padding(top = 9.dp, bottom = 8.dp))
         if (naverConnected) TextButton(onClick = { disconnectDialog = true }) { Text("네이버 연결 해제", fontSize = 11.sp, color = MaterialTheme.colorScheme.error) }
         Spacer(Modifier.height(22.dp))
@@ -102,7 +103,7 @@ import java.time.format.DateTimeFormatter
         }
         Spacer(Modifier.height(27.dp))
         Text("일정은 선택한 원본 캘린더에 저장됩니다. Google과 네이버 간 자동 복제는 하지 않습니다. 네이버 비밀번호는 기기에 암호화해 보관합니다.", color = Muted, fontSize = 11.sp)
-        Text("MOA  0.1.4  ·  Made for your everyday", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 18.dp))
+        Text("MOA  0.1.5  ·  Made for your everyday", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 18.dp))
     }
     if (disconnectDialog) AlertDialog(onDismissRequest = { disconnectDialog = false }, title = { Text("네이버 연결을 해제할까요?") },
         text = { Text("이 기기의 로그인 정보와 저장된 네이버 일정만 지웁니다. 네이버에 있는 원본 일정은 유지됩니다.") },

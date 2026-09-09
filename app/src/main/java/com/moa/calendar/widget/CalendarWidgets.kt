@@ -14,6 +14,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.provider.CalendarContract
 import com.moa.calendar.data.DeviceCalendars
 import android.widget.RemoteViews
@@ -198,8 +199,11 @@ class CalendarSyncJob : JobService() {
                 }
                 val now = LocalDate.now()
                 val zone = ZoneId.systemDefault()
-                val result = CalendarRepository(applicationContext).load(now.withDayOfMonth(1).minusDays(7).atStartOfDay(zone).toInstant().toEpochMilli(), now.plusMonths(3).atStartOfDay(zone).toInstant().toEpochMilli())
-                retry = result.errors.isNotEmpty()
+                val repository = CalendarRepository(applicationContext)
+                val from = params.extras.getLong("from", now.withDayOfMonth(1).minusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli())
+                val to = params.extras.getLong("to", now.plusMonths(3).atStartOfDay(zone).toInstant().toEpochMilli())
+                val result = repository.load(from, to, initialOnly = params.jobId == INITIAL_JOB)
+                retry = if (params.jobId == INITIAL_JOB) repository.initialNaverSyncPending() else result.errors.isNotEmpty()
                 WidgetUpdater.update(applicationContext)
             } catch (e: Exception) { if (e is CancellationException) throw e; retry = true }
             finally { withContext(NonCancellable + Dispatchers.Main) {
@@ -217,16 +221,29 @@ class CalendarSyncJob : JobService() {
     override fun onDestroy() { jobs.values.forEach { it.cancel() }; jobs.clear(); super.onDestroy() }
     companion object {
         const val CONTENT_JOB = 2703
+        const val INITIAL_JOB = 2704
         fun schedule(context: Context) {
             val scheduler = context.getSystemService(JobScheduler::class.java)
+            val repository = CalendarRepository(context)
             val job = JobInfo.Builder(2701, ComponentName(context, CalendarSyncJob::class.java))
                 .setPeriodic(30 * 60 * 1000L).setPersisted(true)
-                .setRequiredNetworkType(if (CalendarRepository(context).naverConnected()) JobInfo.NETWORK_TYPE_ANY else JobInfo.NETWORK_TYPE_NONE).build()
+                .setRequiredNetworkType(if (repository.naverConnected()) JobInfo.NETWORK_TYPE_ANY else JobInfo.NETWORK_TYPE_NONE).build()
             val existing = scheduler.getPendingJob(2701)
             @Suppress("DEPRECATION")
             val changed = existing == null || existing.networkType != job.networkType
             if (changed) scheduler.schedule(job)
+            if (repository.initialNaverSyncPending() && scheduler.getPendingJob(INITIAL_JOB) == null) {
+                val now = LocalDate.now()
+                val zone = ZoneId.systemDefault()
+                scheduleInitial(context, now.withDayOfMonth(1).minusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli(),
+                    now.plusMonths(3).atStartOfDay(zone).toInstant().toEpochMilli())
+            } else if (!repository.naverConnected()) scheduler.cancel(INITIAL_JOB)
             scheduleContentWatch(context)
+        }
+        fun scheduleInitial(context: Context, from: Long, to: Long) {
+            val extras = PersistableBundle().apply { putLong("from", from); putLong("to", to) }
+            context.getSystemService(JobScheduler::class.java).schedule(JobInfo.Builder(INITIAL_JOB, ComponentName(context, CalendarSyncJob::class.java))
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPersisted(true).setExtras(extras).build())
         }
         fun scheduleContentWatch(context: Context, replace: Boolean = false): Boolean {
             val scheduler = context.getSystemService(JobScheduler::class.java)

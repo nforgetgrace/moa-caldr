@@ -124,4 +124,5 @@ data class CalendarSnapshot(
     val tasks: List<CalendarTask> = emptyList(),
     val taskNotice: String = "네이버 계정을 연결하면 서버가 제공하는 할 일을 확인할 수 있어요.",
     val googleSyncNotice: String = "",
+    val initialNaverSync: Boolean = false,
 )

@@ -159,7 +159,7 @@ import java.time.format.DateTimeFormatter
                 Button(onClick = {
                     scope.launch { busy = true; error = ""; try { onConnect(username, password); password = "" } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: "연결에 실패했어요." } finally { busy = false } }
                 }, Modifier.fillMaxWidth().padding(top = 20.dp).height(50.dp), enabled = !busy && username.isNotBlank() && password.isNotBlank(), shape = RoundedCornerShape(14.dp)) {
-                    if (busy) { CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp); Text("  연결 확인 중…") }
+                    if (busy) { CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp); Text("  로그인 확인 중…") }
                     else Text("연결하기")
                 }
                 TextButton(onClick = onDismiss, Modifier.fillMaxWidth(), enabled = !busy) { Text("닫기") }

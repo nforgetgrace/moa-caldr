@@ -1,0 +1,4 @@
+READY: widget sync retains the event; spinner visibility verified.
+PASS: real home-widget date clicks reuse the recent activity, change the selected date and retain cache after closing/reopening during sync.
+PASS: repository refresh failure preserves cached events.
+PASS: cached calendars/events and widget updates stay available during a held sync lock; confirmed empty cache removes deleted events.

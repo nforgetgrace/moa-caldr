@@ -1,0 +1,7 @@
+로그인 - Google 계정 [0,128][1080,2339] clickable=false
+로그인 [451,380][630,461] clickable=false
+Google 계정을 사용하세요. 계정이 이 기기에 추가되므로 다른 Google 앱에서 사용할 수 있습니다. [65,487][1018,603] clickable=false
+계정 사용에 관해 자세히 알아보기 [233,600][847,676] clickable=true
+이메일을 잊으셨나요? [52,926][412,991] clickable=true
+다음 [821,2175][1021,2272] clickable=true
+계정 만들기 [42,2175][265,2272] clickable=true

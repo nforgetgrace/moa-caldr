@@ -26,6 +26,7 @@ class RefreshRegressionRunner : Instrumentation() {
     }
 
     override fun onStart() {
+        if (scenario == "login") { LoginRegression(this).run(); return }
         val result = Bundle()
         val prefs = targetContext.getSharedPreferences("moa_calendar", 0)
         val original = prefs.all

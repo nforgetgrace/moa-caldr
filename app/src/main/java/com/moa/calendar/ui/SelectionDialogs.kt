@@ -91,6 +91,32 @@ import com.moa.calendar.data.*
     }
 }
 
+@Composable fun GoogleConnectDialog(onDismiss: () -> Unit, onExistingAccount: () -> Unit, onNewAccount: () -> Unit, busy: Boolean, error: String) {
+    val green = Color(CalendarSource.GOOGLE.displayColor(0))
+    PickerDialog("Google 계정 연결", "어떤 계정을 연결할까요?", onDismiss) {
+        @Composable fun action(title: String, subtitle: String, icon: String, onClick: () -> Unit) {
+            Surface(shape = RoundedCornerShape(16.dp), color = Color.White, border = BorderStroke(1.dp, LineColor)) {
+                Row(Modifier.fillMaxWidth().clickable(enabled = !busy, role = Role.Button, onClick = onClick)
+                    .padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(green.copy(alpha = .1f)), contentAlignment = Alignment.Center) {
+                        LineIcon(icon, green, Modifier.size(21.dp))
+                    }
+                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                        Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text(subtitle, Modifier.padding(top = 5.dp), color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                    }
+                    LineIcon("right", Muted, Modifier.size(16.dp))
+                }
+            }
+        }
+        action("기기에 있는 계정", "휴대폰의 계정을 선택해요.", "calendar", onExistingAccount)
+        action("새 Google 계정 추가", "새 계정으로 로그인해요.", "plus", onNewAccount)
+        Text(if (busy) "Google 로그인 화면을 여는 중…" else "다음 단계는 Android · Google 화면에서 진행됩니다.",
+            Modifier.padding(horizontal = 2.dp, vertical = 6.dp), fontSize = 11.sp, color = Muted, lineHeight = 17.sp)
+        if (error.isNotBlank()) Text(error, fontSize = 12.sp, color = MaterialTheme.colorScheme.error, lineHeight = 18.sp)
+    }
+}
+
 @Composable fun CalendarDestination(calendar: CalendarInfo?, enabled: Boolean, onClick: () -> Unit) {
     Surface(shape = RoundedCornerShape(14.dp), color = Color.White, border = BorderStroke(1.dp, LineColor)) {
         Row(Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button, onClick = onClick)

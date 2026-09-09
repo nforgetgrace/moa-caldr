@@ -5,11 +5,11 @@ Google 캘린더와 네이버 CalDAV 일정을 한곳에서 관리하는 네이�
 ## 실행
 
 - Android 8.0(API 26) 이상.
-- 설치 파일: [`dist/moa-calendar-0.1.4-debug.apk`](dist/moa-calendar-0.1.4-debug.apk) (약 12MB).
+- 설치 파일: [`dist/moa-calendar-0.1.5-debug.apk`](dist/moa-calendar-0.1.5-debug.apk) (약 12MB).
 - **실제 일정만 표시합니다.** 연결 전에는 빈 캘린더이며, 업데이트하면 이전 버전의 예시 일정과 체험 설정을 제거합니다. 원본 서비스의 일정은 유지합니다.
-- **설정 → Google Calendar → Google 계정 선택 · 변경**에서 사용할 계정을 선택합니다. 처음에는 캘린더 접근을 허용합니다. 목록에 없는 계정은 **다른 계정 선택 · 추가**로 Android 계정 선택·로그인 화면을 엽니다. Android에 Google 계정이 등록되어 있고 캘린더 동기화가 켜져 있어야 합니다. Google Calendar 앱/계정 동기화가 서버 반영을 담당합니다.
+- **설정 → Google Calendar → Google 계정 선택 · 변경**에서 사용할 계정을 선택합니다. 처음에는 캘린더 접근을 허용합니다. 목록에 없는 계정은 **다른 계정 선택 · 추가**에서 **기기에 있는 계정** 또는 **새 Google 계정 추가**를 고릅니다. 새 계정은 Google 로그인으로 연결하며, 기기 계정 접근 동의와 로그인은 Android·Google 화면에서 진행합니다. Android에 Google 계정이 등록되어 있고 캘린더 동기화가 켜져 있어야 합니다. Google Calendar 앱/계정 동기화가 서버 반영을 담당합니다.
 - **표시할 캘린더 → Google · 선택한 계정**에서 캘린더를 확인합니다. 동기화가 꺼진 캘린더도 목록에 표시하며 **동기화 켜기**로 활성화합니다. **선택한 Google 계정에서 다시 가져오기**는 기기 동기화에 갱신을 요청합니다. Google Calendar 동기화 기능이 없거나 계정 자동 동기화가 꺼져 있으면 안내합니다. 이메일로 이름 붙인 로컬 캘린더는 **이 기기의 다른 캘린더**로 구분합니다.
-- **설정 → NAVER Calendar → 계정 연결**에서 네이버 ID와 비밀번호를 입력합니다. 2단계 인증 계정은 앱 비밀번호를 사용합니다. 서버·SSL·포트는 기본 설정되어 있고, 아이폰 고급 설정의 principal 계정 주소는 로그인 후 자동으로 찾습니다.
+- **설정 → NAVER Calendar → 계정 연결**에서 네이버 ID와 비밀번호를 입력합니다. 2단계 인증 계정은 앱 비밀번호를 사용합니다. 서버·SSL·포트는 기본 설정되어 있고, 아이폰 고급 설정의 principal 계정 주소는 로그인 후 자동으로 찾습니다. 계정 확인에 성공하면 입력 창을 바로 닫고 일정·할 일은 백그라운드 작업으로 가져옵니다. 같은 계정에 다시 연결할 때 기존 일정은 유지합니다.
 - **일정 → 할 일**에서 네이버 CalDAV가 제공하는 할 일을 조회합니다. 마감일 없는 항목과 지난 항목도 포함하며, 완료 항목은 스위치로 표시합니다. 서버가 할 일을 제공하지 않거나 조회에 실패하면 이유를 표시합니다. 네이버 웹에 있는 모든 할 일이 CalDAV로 공개된다는 의미는 아닙니다.
 - **위젯** 탭에서 월간 위젯 또는 다가오는 일정 위젯을 홈 화면에 추가합니다. 런처가 고정 요청을 지원하지 않으면 홈 화면을 길게 눌러 위젯 목록에서 추가합니다.
 
@@ -78,7 +78,7 @@ python3 scripts/device_ui.py --adb /path/to/adb --serial DEVICE_SERIAL dump
 python3 scripts/device_ui.py --adb /path/to/adb --serial DEVICE_SERIAL screenshot screen.png
 ```
 
-v0.1.4 검증 결과는 [`docs/VALIDATION-0.1.4.md`](docs/VALIDATION-0.1.4.md), 화면은 `docs/screenshots/v0.1.4/`에 있습니다. 이전 검증 기록은 각 버전의 `docs/VALIDATION-*.md`에 보존합니다. 디자인 규칙은 [`DESIGN.md`](DESIGN.md)에 있습니다.
+v0.1.5 검증 결과는 [`docs/VALIDATION-0.1.5.md`](docs/VALIDATION-0.1.5.md), 화면은 `docs/screenshots/v0.1.5/`에 있습니다. 이전 검증 기록은 각 버전의 `docs/VALIDATION-*.md`에 보존합니다. 디자인 규칙은 [`DESIGN.md`](DESIGN.md)에 있습니다.
 
 ## 주요 코드
 
