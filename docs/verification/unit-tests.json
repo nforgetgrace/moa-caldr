@@ -1,0 +1,16 @@
+[
+  {
+    "suite": "com.moa.calendar.data.CalDavClientTest",
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "timestamp": "2026-09-09T06:16:05.790Z"
+  },
+  {
+    "suite": "com.moa.calendar.data.IcsCodecTest",
+    "tests": 14,
+    "failures": 0,
+    "errors": 0,
+    "timestamp": "2026-09-09T06:16:06.083Z"
+  }
+]

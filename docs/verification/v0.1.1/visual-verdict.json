@@ -1,0 +1,19 @@
+{
+  "workflow": "native-android-visual-check",
+  "iteration": 8,
+  "score": 94,
+  "verdict": "pass",
+  "category_match": true,
+  "differences": [
+    "Month widget uses short single-line event titles with source-color backgrounds and overflow counts; not a pixel clone."
+  ],
+  "suggestions": [],
+  "reasoning": "Manual review of actual Android API 35 account picker, event identity, Naver fixed-server login form and month widget. No clipping at tested dimensions. Provider change updated the widget without opening the app.",
+  "evidence": [
+    "docs/screenshots/v0.1.1/account-picker.png",
+    "docs/screenshots/v0.1.1/event-account.png",
+    "docs/screenshots/v0.1.1/month-widget.png",
+    "docs/screenshots/v0.1.1/naver-connection.png"
+  ],
+  "complete": true
+}

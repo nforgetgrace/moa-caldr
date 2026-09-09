@@ -1,0 +1,10 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@drawable/widget_light">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:id="@+id/widget_title" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/app_name" android:textSize="22sp" android:textStyle="bold" android:textColor="#242A3D" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/brand" android:textSize="18sp" android:textStyle="bold" android:textColor="#5965D8" />
+        <TextView android:id="@+id/widget_refresh" android:layout_width="40dp" android:layout_height="40dp" android:gravity="center" android:text="@string/refresh_symbol" android:textSize="24sp" android:textColor="#778095" android:contentDescription="@string/refresh_events" />
+    </LinearLayout>
+    <TextView android:id="@+id/widget_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="10dp" android:text="@string/connect_calendars" android:textSize="11sp" android:textColor="#778095" />
+    <LinearLayout android:id="@+id/widget_days" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical" />
+    <TextView android:id="@+id/widget_footer" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/today_events" android:textSize="11sp" android:textColor="#5965D8" />
+</LinearLayout>

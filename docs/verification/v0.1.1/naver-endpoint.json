@@ -1,0 +1,8 @@
+{
+  "endpoint": "https://caldav.calendar.naver.com/",
+  "method": "PROPFIND",
+  "tls_certificate_verified": true,
+  "unauthenticated_status": 401,
+  "authentication_challenge": "basic realm=\"Naver Calendar\"",
+  "authenticated_calendar_access": "NOT TESTED; no account credentials available"
+}

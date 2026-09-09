@@ -1,0 +1,211 @@
+package com.moa.calendar.data
+
+import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.security.KeyStore
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
+class CalendarRepository(context: Context) {
+    private val app = context.applicationContext
+    private val prefs = app.getSharedPreferences("moa_calendar", Context.MODE_PRIVATE)
+    private val device = DeviceCalendars(app)
+    private val vault = CredentialVault(app)
+
+    init {
+        // Upgrade old installations without touching any real calendar or credential.
+        if (prefs.contains("demo") || prefs.contains("demo_events")) {
+            prefs.edit().remove("demo").remove("demo_events")
+                .putStringSet("hidden", hiddenCalendars().filterNot { it.startsWith("demo:") }.toSet()).apply()
+        }
+    }
+
+    fun selectedGoogleAccount(): String? = prefs.getString("google_account", null)
+    fun selectGoogleAccount(account: String?) {
+        require(account == null || account.isNotBlank())
+        prefs.edit().apply { if (account == null) remove("google_account") else putString("google_account", account) }.apply()
+    }
+    fun naverConnected(): Boolean = vault.exists()
+    fun naverAccount(): String = prefs.getString("naver_account", "").orEmpty()
+    fun hiddenCalendars(): Set<String> = prefs.getStringSet("hidden", emptySet()).orEmpty().toSet()
+    fun setVisible(id: String, visible: Boolean) {
+        val hidden = hiddenCalendars().toMutableSet()
+        if (visible) hidden.remove(id) else hidden.add(id)
+        prefs.edit().putStringSet("hidden", hidden).apply()
+    }
+
+    suspend fun load(from: Long, to: Long, refreshRemote: Boolean = true): CalendarSnapshot = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val errors = mutableListOf<String>()
+            if (!refreshRemote && naverConnected()) prefs.getString("last_sync_error", null)?.let { errors += it }
+            val allDeviceCalendars = runCatching { device.calendars() }.getOrElse { errors += "기기 캘린더를 읽지 못했어요. 권한을 확인해 주세요."; emptyList() }
+            val deviceCalendars = calendarsForGoogleAccount(allDeviceCalendars, selectedGoogleAccount())
+            val deviceEvents = runCatching { device.events(deviceCalendars, from, to) }.getOrElse { errors += "기기 일정을 읽지 못했어요. 권한을 확인해 주세요."; emptyList() }
+            var remoteCalendars = readCalendars()
+            if (naverConnected() && refreshRemote) {
+                try {
+                    val credentials = vault.read()
+                    val client = CalDavClient(credentials.server, credentials.username, credentials.password)
+                    val discovered = client.discover()
+                    val resources = discovered.associateWith { client.fetch(it, from, to) }
+                    // Validate all responses before replacing any successful cache.
+                    resources.forEach { (calendar, data) -> data.forEach { IcsCodec.parse(it, calendar, from, to) } }
+                    storeRemote(discovered, resources)
+                    remoteCalendars = discovered
+                    prefs.edit().putLong("last_sync", System.currentTimeMillis()).remove("last_sync_error").apply()
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    val message = (e.message ?: "네이버 연결을 확인해 주세요.") + " 저장된 일정을 표시합니다."
+                    errors += message
+                    prefs.edit().putString("last_sync_error", message).apply()
+                }
+            }
+            val remoteEvents = mutableListOf<CalendarEvent>()
+            for (calendar in remoteCalendars) {
+                try { readResources(calendar.id).forEach { remoteEvents += IcsCodec.parse(it, calendar, from, to) } }
+                catch (e: Exception) { errors += "${calendar.name}: ${e.message ?: "일정을 읽지 못했어요."}" }
+            }
+            CalendarSnapshot(deviceCalendars + remoteCalendars, (deviceEvents + remoteEvents).sortedBy { it.startMillis },
+                prefs.getLong("last_sync", 0), errors, allDeviceCalendars.filter { it.source == CalendarSource.GOOGLE }.map { it.account }.distinct().sorted())
+        }
+    }
+
+    suspend fun connectNaver(username: String, password: String, server: String = "https://caldav.calendar.naver.com/") = withContext(Dispatchers.IO) {
+        lock.withLock {
+            val credentials = NaverCredentials(server.trim(), username.trim().removeSuffix("@naver.com"), password)
+            val client = CalDavClient(credentials.server, credentials.username, credentials.password)
+            val calendars = client.discover()
+            val today = LocalDate.now()
+            val from = today.minusMonths(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            val to = today.plusMonths(3).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            val resources = calendars.associateWith { client.fetch(it, from, to) }
+            resources.forEach { (c, data) -> data.forEach { IcsCodec.parse(it, c, from, to) } }
+            vault.save(credentials)
+            storeRemote(calendars, resources)
+            prefs.edit().putString("naver_account", credentials.username)
+                .putLong("last_sync", System.currentTimeMillis()).remove("last_sync_error").commit()
+        }
+    }
+
+    suspend fun disconnectNaver() = withContext(Dispatchers.IO) {
+        lock.withLock {
+            vault.clear()
+            prefs.edit().remove("naver_account").remove("remote").remove("last_sync").remove("last_sync_error").commit()
+        }
+    }
+
+    suspend fun save(draft: EventDraft, existing: CalendarEvent? = null) = withContext(Dispatchers.IO) {
+        lock.withLock {
+            validateDraft(draft)
+            require(existing == null || existing.calendarId == draft.calendarId) { "일정의 원본 캘린더는 변경할 수 없어요." }
+            when {
+                draft.calendarId.startsWith("device:") -> device.save(draft, existing)
+                else -> {
+                    val calendar = readCalendars().firstOrNull { it.id == draft.calendarId } ?: error("캘린더를 찾지 못했어요.")
+                    require(calendar.writable) { "읽기 전용 캘린더예요." }
+                    val credentials = vault.read()
+                    val client = CalDavClient(credentials.server, credentials.username, credentials.password)
+                    val uid = UUID.randomUUID().toString()
+                    val href = existing?.href ?: "${calendar.id.trimEnd('/')}/$uid.ics"
+                    val ics = IcsCodec.write(draft, existing, uid)
+                    val etag = client.put(href, ics, existing?.etag)
+                    val resources = readResources(calendar.id).filterNot { it.href == href } + DavResource(href, etag, ics)
+                    updateResourceCache(calendar.id, resources)
+                }
+            }
+        }
+    }
+
+    suspend fun delete(event: CalendarEvent) = withContext(Dispatchers.IO) {
+        lock.withLock {
+            require(!event.recurring) { "반복 일정은 원본 캘린더에서 삭제해 주세요." }
+            when (event.source) {
+                CalendarSource.GOOGLE, CalendarSource.DEVICE -> device.delete(event)
+                CalendarSource.NAVER -> {
+                    check(readCalendars().any { it.id == event.calendarId && it.writable }) { "읽기 전용 캘린더예요." }
+                    require(!event.rawIcs.contains("ATTENDEE", true) && !event.rawIcs.contains("ORGANIZER", true)) { "초대 일정은 원본 캘린더에서 삭제해 주세요." }
+                    val credentials = vault.read()
+                    CalDavClient(credentials.server, credentials.username, credentials.password).delete(event.href, event.etag)
+                    updateResourceCache(event.calendarId, readResources(event.calendarId).filterNot { it.href == event.href })
+                }
+            }
+        }
+    }
+
+    private fun readCalendars(): List<CalendarInfo> {
+        val array = JSONObject(prefs.getString("remote", "{}")!!).optJSONArray("calendars") ?: JSONArray()
+        return (0 until array.length()).map { i -> array.getJSONObject(i).let {
+            CalendarInfo(it.getString("id"), it.getString("name"), it.getString("account"), CalendarSource.NAVER, it.getInt("color"), it.optBoolean("writable"))
+        } }
+    }
+    private fun readResources(id: String): List<DavResource> {
+        val array = JSONObject(prefs.getString("remote", "{}")!!).optJSONObject("resources")?.optJSONArray(id) ?: JSONArray()
+        return (0 until array.length()).map { array.getJSONObject(it).let { o -> DavResource(o.getString("href"), o.optString("etag"), o.getString("ics")) } }
+    }
+    private fun resourceJson(resources: List<DavResource>) = JSONArray().apply {
+        resources.forEach { put(JSONObject().put("href", it.href).put("etag", it.etag).put("ics", it.ics)) }
+    }
+    private fun storeRemote(calendars: List<CalendarInfo>, resources: Map<CalendarInfo, List<DavResource>>) {
+        val json = JSONObject().put("calendars", JSONArray().apply { calendars.forEach {
+            put(JSONObject().put("id", it.id).put("name", it.name).put("account", it.account).put("color", it.color).put("writable", it.writable))
+        } }).put("resources", JSONObject().apply { resources.forEach { (calendar, data) -> put(calendar.id, resourceJson(data)) } })
+        check(prefs.edit().putString("remote", json.toString()).commit()) { "일정 캐시를 저장하지 못했어요." }
+    }
+    private fun updateResourceCache(id: String, resources: List<DavResource>) {
+        val json = JSONObject(prefs.getString("remote", "{}")!!)
+        val all = json.optJSONObject("resources") ?: JSONObject()
+        all.put(id, resourceJson(resources))
+        json.put("resources", all)
+        prefs.edit().putString("remote", json.toString()).commit()
+    }
+
+    companion object {
+        private val lock = Mutex()
+    }
+}
+
+private data class NaverCredentials(val server: String, val username: String, val password: String)
+
+private class CredentialVault(context: Context) {
+    private val prefs = context.getSharedPreferences("moa_vault", Context.MODE_PRIVATE)
+    fun exists() = prefs.contains("encrypted")
+    fun clear() { check(prefs.edit().clear().commit()) }
+    private fun key(): SecretKey {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (store.getKey("moa_naver", null) as? SecretKey)?.let { return it }
+        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+            init(KeyGenParameterSpec.Builder("moa_naver", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
+        }.generateKey()
+    }
+    fun save(value: NaverCredentials) {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
+        val json = JSONObject().put("server", value.server).put("username", value.username).put("password", value.password).toString()
+        val encrypted = cipher.doFinal(json.toByteArray(Charsets.UTF_8))
+        check(prefs.edit().putString("encrypted", Base64.encodeToString(encrypted, Base64.NO_WRAP))
+            .putString("iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP)).commit())
+    }
+    fun read(): NaverCredentials {
+        try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(prefs.getString("iv", ""), Base64.NO_WRAP)))
+            }
+            val text = cipher.doFinal(Base64.decode(prefs.getString("encrypted", ""), Base64.NO_WRAP)).toString(Charsets.UTF_8)
+            val json = JSONObject(text)
+            return NaverCredentials(json.getString("server"), json.getString("username"), json.getString("password"))
+        } catch (_: Exception) { error("저장된 로그인 정보를 열 수 없어요. 네이버 계정을 다시 연결해 주세요.") }
+    }
+}

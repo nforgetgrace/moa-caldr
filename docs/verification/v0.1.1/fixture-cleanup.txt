@@ -1,0 +1,1 @@
+PASS: test provider calendars and selected fixture account removed from the isolated AVD. APK has no seeded event data.

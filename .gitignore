@@ -1,0 +1,15 @@
+.gradle/
+.kotlin/
+.idea/
+local.properties
+**/build/
+*.jks
+*.keystore
+.DS_Store
+.omx/
+dist/*.apk
+
+# Private design references remain local.
+docs/reference.png
+# Reviewed installable build accompanying this source revision.
+!dist/moa-calendar-0.1.1-debug.apk

@@ -1,0 +1,7 @@
+Google 계정 선택 [183,754][645,846] clickable=false
+선택한 계정의 일정을 앱과 위젯에 표시합니다. [183,888][783,933] clickable=false
+moa-a@example.test [309,997][632,1037] clickable=false
+moa-b@example.test [309,1165][632,1205] clickable=false
+이 기기의 모든 Google 계정 표시 [215,1310][645,1355] clickable=false
+다른 Google 계정 선택 / 추가 [215,1434][623,1483] clickable=false
+닫기 [790,1623][852,1672] clickable=false

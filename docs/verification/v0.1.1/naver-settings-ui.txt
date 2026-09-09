@@ -1,0 +1,12 @@
+네이버 캘린더 연결 [116,543][560,625] clickable=false
+CalDAV · 실험적 연결 [116,643][397,688] clickable=false
+서버  caldav.calendar.naver.com
+보안 연결  SSL · 443
+계정 주소는 로그인 후 자동으로 찾습니다. [116,720][601,840] clickable=false
+네이버는 Android CalDAV를 공식 지원하지 않아 계정에 따라 연결이 제한될 수 있어요. 2단계 인증을 사용한다면 앱 비밀번호를 입력해 주세요. [116,890][964,1037] clickable=false
+네이버 아이디 [158,1151][384,1207] clickable=false
+비밀번호 또는 앱 비밀번호 [158,1345][584,1401] clickable=false
+앱 비밀번호 발급 안내 ↗ [148,1487][472,1532] clickable=false
+비밀번호는 기기 안에 암호화해 보관하고 네이버 서버로만 전송해요. [116,1572][901,1612] clickable=false
+연결하기 [478,1706][602,1755] clickable=false
+닫기 [509,1835][571,1884] clickable=false

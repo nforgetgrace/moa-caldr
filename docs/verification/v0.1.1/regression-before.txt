@@ -1,0 +1,65 @@
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+
+> Task :app:testDebugUnitTest FAILED
+
+CalDavClientTest > successful WebDAV status does not require reason phrase FAILED
+    java.io.IOException at CalDavClientTest.kt:91
+
+CalDavClientTest > bad downloaded body fails instead of silently dropping the event FAILED
+    java.lang.AssertionError at CalDavClientTest.kt:76
+
+CalDavClientTest > missing calendar-data property downloads individual resource FAILED
+    java.io.IOException at CalDavClientTest.kt:67
+
+CalDavClientTest > etag only event listing downloads body and pairs it with fresh GET etag FAILED
+    java.io.IOException at CalDavClientTest.kt:32
+
+CalDavClientTest > missing event body cannot send credentials to a foreign resource FAILED
+    java.lang.AssertionError at CalDavClientTest.kt:84
+
+CalDavClientTest > missing GET etag cannot reuse potentially stale listing etag FAILED
+    java.io.IOException at CalDavClientTest.kt:59
+
+CalDavClientTest > calendar collection entry is not an event with missing data FAILED
+    java.io.IOException at CalDavClientTest.kt:22
+
+20 tests completed, 7 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file://<workspace>/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 1s
+24 actionable tasks: 2 executed, 22 up-to-date

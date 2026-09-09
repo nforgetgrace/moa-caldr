@@ -1,0 +1,92 @@
+모아 · 한 달 [67,159][1013,1377] clickable=false
+9월 [114,211][768,296] clickable=false
+moa [768,222][861,285] clickable=false
+↻ [861,201][966,306] clickable=true
+예시 일정 · 내 캘린더는 앱에서 연결 [114,306][966,349] clickable=false
+일 [119,380][230,519] clickable=false
+월 [240,380][351,519] clickable=false
+화 [361,380][473,519] clickable=false
+수 [483,380][595,519] clickable=false
+목 [605,380][717,519] clickable=false
+금 [727,380][839,519] clickable=false
+토 [849,380][961,519] clickable=false
+30
+  [119,529][230,668] clickable=true
+31
+  [240,529][351,668] clickable=true
+1
+  [361,529][473,668] clickable=true
+2
+  [483,529][595,668] clickable=true
+3
+• [605,529][717,668] clickable=true
+4
+  [727,529][839,668] clickable=true
+5
+  [849,529][961,668] clickable=true
+6
+  [119,678][230,817] clickable=true
+7
+• [240,678][351,817] clickable=true
+8
+  [361,678][473,817] clickable=true
+9
+• [483,678][595,817] clickable=true
+10
+  [605,678][717,817] clickable=true
+11
+• [727,678][839,817] clickable=true
+12
+  [849,678][961,817] clickable=true
+13
+• [119,827][230,966] clickable=true
+14
+  [240,827][351,966] clickable=true
+15
+  [361,827][473,966] clickable=true
+16
+• [483,827][595,966] clickable=true
+17
+  [605,827][717,966] clickable=true
+18
+• [727,827][839,966] clickable=true
+19
+  [849,827][961,966] clickable=true
+20
+  [119,976][230,1116] clickable=true
+21
+  [240,976][351,1116] clickable=true
+22
+  [361,976][473,1116] clickable=true
+23
+  [483,976][595,1116] clickable=true
+24
+• [605,976][717,1116] clickable=true
+25
+  [727,976][839,1116] clickable=true
+26
+  [849,976][961,1116] clickable=true
+27
+  [119,1126][230,1266] clickable=true
+28
+  [240,1126][351,1266] clickable=true
+29
+  [361,1126][473,1266] clickable=true
+30
+  [483,1126][595,1266] clickable=true
+1
+  [605,1126][717,1266] clickable=true
+2
+  [727,1126][839,1266] clickable=true
+3
+  [849,1126][961,1266] clickable=true
+오늘 3개의 일정  → [114,1292][966,1335] clickable=true
+Home [0,128][1080,2337] clickable=false
+Phone [83,1873][256,2068] clickable=true
+Messages [330,1873][503,2068] clickable=true
+Chrome [577,1873][750,2068] clickable=true
+Gmail [824,1873][997,2068] clickable=true
+Google search [90,2125][990,2290] clickable=true
+Google app [101,2144][227,2270] clickable=true
+Voice search [727,2125][853,2290] clickable=true
+Google Lens [853,2125][979,2290] clickable=true

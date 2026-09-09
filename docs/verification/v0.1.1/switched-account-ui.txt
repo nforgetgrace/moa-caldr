@@ -1,0 +1,15 @@
+moa [158,162][302,252] clickable=false
+일상을 한곳에 [326,187][489,227] clickable=false
+일정 새로고침 [814,178][872,236] clickable=false
+일정 검색 [930,178][988,236] clickable=false
+다가오는 일정 [63,349][532,470] clickable=false
+9월 9일부터, 차근차근. [63,491][437,547] clickable=false
+9월 9일 수요일 [63,660][274,709] clickable=false
+18:00 [90,791][170,828] clickable=false
+18:25 [90,839][156,869] clickable=false
+MoaSyncA1 [266,787][450,827] clickable=false
+캘린더 [134,2264][206,2301] clickable=false
+일정 [392,2264][440,2301] clickable=false
+위젯 [639,2264][687,2301] clickable=false
+설정 [886,2264][934,2301] clickable=false
+일정 추가 [732,1951][1038,2098] clickable=false

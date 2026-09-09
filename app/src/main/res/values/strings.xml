@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">모아 캘린더</string>
+    <string name="brand">moa</string>
+    <string name="upcoming">다가오는 일정</string>
+    <string name="refresh_symbol">↻</string>
+    <string name="refresh_events">일정 새로고침</string>
+    <string name="open_app_events">앱에서 일정을 확인해 주세요</string>
+    <string name="connect_calendars">앱에서 캘린더를 연결해 주세요</string>
+    <string name="all_events">모든 일정 보기 →</string>
+    <string name="today_events">오늘의 일정 보기 →</string>
+</resources>
