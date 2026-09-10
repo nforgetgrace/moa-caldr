@@ -136,3 +136,9 @@
 - Latest user instruction overrides manual-only spinner rules: show the top spinner while app refresh, Naver background sync, or the selected Google account's Android sync is active; remove it after completion, failure or cancellation. Keep all cached schedules visible.
 - Use the existing 44dp refresh slot and 18dp spinner. Google status comes from Android active-sync notifications; pending jobs alone must not leave a permanent spinner.
 - Verify network payload/latency with a controlled HTTP fixture, then verify repeated spinner start/stop and cache retention through real app/widget entry and background repository jobs.
+
+## Sync state reconciliation · v0.1.9
+- Batch missing CalDAV bodies on first load and without strong cached ETags, up to 50 resources per multiget. A missing version must never force thousands of sequential GETs when the server supports multiget. Unsupported multiget falls back once; preserve GET compatibility for missing inline bodies and strict complete-result validation.
+- While the app is resumed, reconcile Google calendar sync activity every two seconds and on status callbacks. Stop polling when paused or no account is available. Query status off the main thread; these checks must not start network syncs or reload calendar data.
+- A missed start/end notification must recover through the next status check. Keep the spinner visible for as long as the selected account is actually active; do not invent a completion timeout.
+- Preserve cached schedules, the existing refresh slot and all manual/periodic sync behavior. Verify missing callbacks, account changes and pause/resume with an isolated status source before testing on a real phone.

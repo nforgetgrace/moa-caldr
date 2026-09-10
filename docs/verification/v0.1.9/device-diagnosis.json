@@ -1,0 +1,16 @@
+{
+  "device_model": "SM-F971N",
+  "android_api": 37,
+  "app_version_before": "0.1.8 (9)",
+  "evidence": [
+    "Installed APK SHA-256 matched the committed v0.1.8 artifact",
+    "Android reported Active Syncs: 0",
+    "An observed active Naver task request was waiting for HTTP/2 response headers in downloadResource -> fetchComponent -> fetchTasks",
+    "All cached Naver resources lacked ETags, so the old incremental-only multiget branch was bypassed"
+  ],
+  "limitations": [
+    "UI and thread samples are not one atomic snapshot; paused composition instances can retain old values",
+    "Missed Google status notification is a reproduced-code risk, not established as the primary device cause"
+  ],
+  "privacy": "Raw logs, screenshots, account information and calendar contents remain excluded from version control."
+}

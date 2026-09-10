@@ -80,10 +80,11 @@ import java.util.Locale
     var googleConnectError by remember { mutableStateOf("") }
     var selectedGoogleAccount by remember { mutableStateOf(repository.selectedGoogleAccount()) }
     var hasCalendarPermission by remember { mutableStateOf(DeviceCalendars(context).hasReadPermission()) }
-    val googleSyncing = remember(externalRevision, resumed, selectedGoogleAccount, snapshot.calendars) {
-        resumed && DeviceCalendars(context).isGoogleSyncActive(selectedGoogleAccount?.let { listOf(it) }
-            ?: snapshot.calendars.filter { it.source == CalendarSource.GOOGLE }.map { it.account })
+    val googleSyncAccounts = remember(selectedGoogleAccount, snapshot.calendars) {
+        selectedGoogleAccount?.let { listOf(it) }
+            ?: snapshot.calendars.filter { it.source == CalendarSource.GOOGLE }.map { it.account }
     }
+    val googleSyncing = rememberGoogleSyncActive(resumed, googleSyncAccounts, externalRevision)
     val syncing = loading || naverSyncing || googleSyncing
     var showNaver by remember { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }

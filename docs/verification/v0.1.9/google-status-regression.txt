@@ -1,0 +1,1 @@
+PASS: Google sync status polls missed active/inactive transitions, switches accounts, stops while paused and keeps cached UI visible.

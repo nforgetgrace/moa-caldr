@@ -1,0 +1,19 @@
+{
+  "iteration": 22,
+  "verdict": "pass",
+  "method": "Manual API 35 screenshot inspection with production app/widget instrumentation; no pixel comparison",
+  "evidence": [
+    "docs/screenshots/v0.1.9/widget-entry-sync.png",
+    "docs/screenshots/v0.1.9/calendar-idle.png"
+  ],
+  "findings": [
+    "Cached calendar and day rows remain visible during widget entry and refresh",
+    "Top refresh slot returns from spinner to refresh icon without layout movement",
+    "Galaxy observation confirmed refresh completion and retained calendars/events/tasks after APK update"
+  ],
+  "limitations": [
+    "No real cloud create/update roundtrip",
+    "Phone released after v0.1.9 installation; no further phone interaction"
+  ],
+  "complete": true
+}

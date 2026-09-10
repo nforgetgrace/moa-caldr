@@ -19,6 +19,7 @@ class CalDavDeltaTest {
     private fun reply(vararg entries: String) { server.enqueue(MockResponse().setResponseCode(207).setBody("""<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">${entries.joinToString("")}</d:multistatus>""")) }
     private fun get(body: String, etag: String = "\"v2\"") { server.enqueue(MockResponse().setHeader("ETag", etag).setBody(body)) }
     private fun fetch(vararg old: DavResource) = client.fetch(calendar, 0, 86_400_000, old.toList())
+    private fun title(resource: DavResource) = resource.ics.substringAfter("SUMMARY:").substringBefore("\n").trimEnd('\r')
 
     @Test fun `unchanged strong etags reuse bodies and remove confirmed deletions`() {
         reply(entry("a"), entry("b"))
@@ -67,6 +68,36 @@ class CalDavDeltaTest {
         assertEquals(ics("new-a").replace("\r\n", "\n"), fetch(cached("a", "")).single().ics)
         assertTrue(server.takeRequest().body.readUtf8().contains("calendar-data"))
     }
+    @Test fun `cold missing bodies without etags use bounded multiget batches instead of sequential GETs`() {
+        reply(*(1..101).map { entry("new$it", "") }.toTypedArray())
+        (1..101).toList().chunked(50).forEach { batch ->
+            reply(*batch.map { entry("new$it", "", ics("new$it")) }.toTypedArray())
+        }
+        val result = fetch(cached("old", ""))
+        assertEquals((1..101).map { "new$it" }, result.map(::title))
+        assertEquals(4, server.requestCount)
+        assertTrue(server.takeRequest().body.readUtf8().contains("calendar-query"))
+        repeat(3) {
+            val request = server.takeRequest()
+            assertEquals("REPORT", request.method)
+            val body = request.body.readUtf8()
+            assertTrue(body.contains("calendar-multiget"))
+            assertTrue(Regex("<d:href>").findAll(body).count() <= 50)
+        }
+    }
+    @Test fun `missing etags refresh bodies again on subsequent syncs`() {
+        reply(entry("a", ""), entry("b", ""))
+        reply(entry("a", "", ics("a-v1")), entry("b", "", ics("b-v1")))
+        val first = fetch(cached("old", ""))
+        assertEquals(listOf("a-v1", "b-v1"), first.map(::title))
+        assertTrue(first.all { it.etag.isBlank() })
+
+        reply(entry("a", ""), entry("b", ""))
+        reply(entry("a", "", ics("a-v2")), entry("b", "", ics("b-v2")))
+        val second = client.fetch(calendar, 0, 86_400_000, first)
+        assertEquals(listOf("a-v2", "b-v2"), second.map(::title))
+        assertEquals(4, server.requestCount)
+    }
     @Test fun `empty cached body is fetched even when etag matches`() {
         reply(entry("a"), entry("b")); get(ics("b"))
         assertEquals(ics("b"), fetch(cached("a"), cached("b").copy(ics = "")).last().ics)
@@ -82,6 +113,21 @@ class CalDavDeltaTest {
             assertTrue(server.takeRequest().body.readUtf8().let { it.contains("calendar-query") && it.contains("calendar-data") })
         }
         assertEquals(12, server.requestCount)
+    }
+    @Test fun `unsupported cold multiget falls back once to full query then GETs missing bodies`() {
+        reply(entry("a", ""), entry("b", ""))
+        server.enqueue(MockResponse().setResponseCode(405))
+        reply(entry("a", ""), entry("b", ""))
+        get(ics("a-fallback"), "")
+        get(ics("b-fallback"), "")
+        val result = fetch(cached("old", ""))
+        assertEquals(listOf("a-fallback", "b-fallback"), result.map(::title))
+        assertEquals(5, server.requestCount)
+        assertTrue(server.takeRequest().body.readUtf8().contains("calendar-query"))
+        assertTrue(server.takeRequest().body.readUtf8().contains("calendar-multiget"))
+        assertTrue(server.takeRequest().body.readUtf8().contains("calendar-data"))
+        assertEquals("GET", server.takeRequest().method)
+        assertEquals("GET", server.takeRequest().method)
     }
     @Test fun `unsupported metadata query falls back to full data`() {
         server.enqueue(MockResponse().setResponseCode(400)); reply(entry("a", body = ics("a")))

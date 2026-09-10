@@ -1,0 +1,41 @@
+{
+  "measurement": "Real-device REPORT header logs grouped by >20-second gaps. A burst may contain overlapping, cancelled or repeated refreshes and is NOT necessarily one sync cycle. Discovery and final publication are excluded. No account/resource content included.",
+  "report_bursts": [
+    {
+      "first_report": "2026-09-10T13:44:19.811000",
+      "last_report_headers": "2026-09-10T13:44:34.283000",
+      "report_span_seconds": 14.472,
+      "report_count": 54,
+      "batch_count": 50,
+      "batch_max_size": 50,
+      "all_report_status_207": true
+    },
+    {
+      "first_report": "2026-09-10T13:45:18.416000",
+      "last_report_headers": "2026-09-10T13:45:54.711000",
+      "report_span_seconds": 36.295,
+      "report_count": 86,
+      "batch_count": 78,
+      "batch_max_size": 50,
+      "all_report_status_207": true
+    },
+    {
+      "first_report": "2026-09-10T13:46:35.864000",
+      "last_report_headers": "2026-09-10T13:46:49.513000",
+      "report_span_seconds": 13.649,
+      "report_count": 54,
+      "batch_count": 50,
+      "batch_max_size": 50,
+      "all_report_status_207": true
+    },
+    {
+      "first_report": "2026-09-10T13:47:35.654000",
+      "last_report_headers": "2026-09-10T13:48:20.114000",
+      "report_span_seconds": 44.46,
+      "report_count": 142,
+      "batch_count": 130,
+      "batch_max_size": 50,
+      "all_report_status_207": true
+    }
+  ]
+}
