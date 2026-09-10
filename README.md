@@ -5,7 +5,7 @@ Google 캘린더와 네이버 CalDAV 일정을 한곳에서 관리하는 네이�
 ## 실행
 
 - Android 8.0(API 26) 이상.
-- 설치 파일: [`dist/moa-calendar-0.1.6-debug.apk`](dist/moa-calendar-0.1.6-debug.apk) (약 12MB).
+- 설치 파일: [`dist/moa-calendar-0.1.7-debug.apk`](dist/moa-calendar-0.1.7-debug.apk) (약 12MB).
 - **실제 일정만 표시합니다.** 연결 전에는 빈 캘린더이며, 업데이트하면 이전 버전의 예시 일정과 체험 설정을 제거합니다. 원본 서비스의 일정은 유지합니다.
 - **설정 → Google Calendar → Google 계정 선택 · 변경**에서 사용할 계정을 선택합니다. 처음에는 캘린더 접근을 허용합니다. 목록에 없는 계정은 **다른 계정 선택 · 추가**에서 **기기에 있는 계정** 또는 **새 Google 계정 추가**를 고릅니다. 새 계정은 Google 로그인으로 연결하며, 기기 계정 접근 동의와 로그인은 Android·Google 화면에서 진행합니다. Android에 Google 계정이 등록되어 있고 캘린더 동기화가 켜져 있어야 합니다. Google Calendar 앱/계정 동기화가 서버 반영을 담당합니다.
 - **표시할 캘린더 → Google · 선택한 계정**에서 캘린더를 확인합니다. 동기화가 꺼진 캘린더도 목록에 표시하며 **동기화 켜기**로 활성화합니다. **선택한 Google 계정에서 다시 가져오기**는 기기 동기화에 갱신을 요청합니다. Google Calendar 동기화 기능이 없거나 계정 자동 동기화가 꺼져 있으면 안내합니다. 이메일로 이름 붙인 로컬 캘린더는 **이 기기의 다른 캘린더**로 구분합니다.
@@ -28,6 +28,7 @@ Google과 네이버에서 같은 제목의 일정도 원본이 다르면 별개�
 - Google 계정 전환 및 선택 상태 저장. 선택한 계정의 캘린더가 아직 없으면 다른 계정으로 대체하지 않습니다.
 - 계정 선택 이메일은 한 줄로 표시하고, 캘린더 선택은 서비스별 목록과 선택 표시를 제공합니다. 이름과 계정이 같아도 이름을 중복 표시하지 않습니다.
 - 일정 상세에 Google/NAVER/기기 구분, 계정 정보, 원본 캘린더 이름을 작게 표시합니다.
+- 앱 달력의 일정 막대 또는 날짜별·일정 목록의 **수정** 버튼을 누르면 **일정 수정** 화면을 엽니다. 제목·날짜·시간·종일 여부·장소·메모를 바꾼 뒤 **변경사항 저장**을 누릅니다. 저장 버튼은 스크롤과 키보드 표시 중에도 보이며, 원본 캘린더와 기존 일정 ID를 유지합니다. 수정할 수 없는 항목은 **보기**와 구체적인 제한 이유를 표시합니다.
 - Android Calendar Provider로 기기 Google 캘린더와 다른 기기 캘린더 조회, 쓰기 가능한 캘린더에 일반 일정 생성/수정/삭제.
 - CalDAV principal 및 calendar-home-set 탐색, 캘린더 목록/권한 조회, 기간별 REPORT, 조건부 PUT/DELETE. 캘린더 자체의 행은 일정과 구분하고, 본문 없는 리소스는 GET으로 조회합니다.
 - iCalendar 시간대, 종일 일정, RRULE/RDATE/EXDATE, 개별 반복 예외 조회.
@@ -80,7 +81,7 @@ python3 scripts/device_ui.py --adb /path/to/adb --serial DEVICE_SERIAL dump
 python3 scripts/device_ui.py --adb /path/to/adb --serial DEVICE_SERIAL screenshot screen.png
 ```
 
-v0.1.6 검증 결과는 [`docs/VALIDATION-0.1.6.md`](docs/VALIDATION-0.1.6.md), 화면은 `docs/screenshots/v0.1.6/`에 있습니다. 이전 검증 기록은 각 버전의 `docs/VALIDATION-*.md`에 보존합니다. 디자인 규칙은 [`DESIGN.md`](DESIGN.md)에 있습니다.
+v0.1.7 검증 결과는 [`docs/VALIDATION-0.1.7.md`](docs/VALIDATION-0.1.7.md), 화면은 `docs/screenshots/v0.1.7/`에 있습니다. 이전 검증 기록은 각 버전의 `docs/VALIDATION-*.md`에 보존합니다. 디자인 규칙은 [`DESIGN.md`](DESIGN.md)에 있습니다.
 
 ## 주요 코드
 

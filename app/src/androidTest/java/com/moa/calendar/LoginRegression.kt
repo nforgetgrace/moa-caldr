@@ -126,6 +126,64 @@ internal class LoginRegression(private val runner: Instrumentation) {
                 check(saved.events.any { it.title == "NaverSavedDuringSync" })
                 check(saved.events.any { it.title == "GoogleSavedDuringSync" })
             }
+            fun editThroughEditor(calendar: com.moa.calendar.data.CalendarInfo, previousTitle: String) {
+                val before = runBlocking { repository.load(from, to, false) }
+                val existing = before.events.single { it.title == previousTitle }
+                val title = previousTitle.replace("Saved", "Edited")
+                var mount = 0
+                fun open() {
+                    val instance = ++mount
+                    runner.runOnMainSync {
+                        activity!!.setContent { MoaTheme { key(calendar.id, instance) {
+                            var open by remember { mutableStateOf(true) }
+                            if (open) EventEditor(LocalDate.now(), listOf(calendar), existing, onDismiss = { open = false },
+                                onSave = { draft -> repository.save(draft, existing); open = false }, onDelete = {})
+                            else Text("수정 창 닫힘")
+                        } } }
+                    }
+                    await("일정 수정")
+                    await(previousTitle)
+                }
+                open()
+                setField("일정 제목", "Discarded edit")
+                click("닫기"); await("수정 창 닫힘")
+                check(runBlocking { repository.load(from, to, false) }.events == before.events) { "Cancel changed events." }
+                open()
+                setField("일정 제목", "")
+                click("변경사항 저장"); await("일정 제목을 입력해 주세요.")
+                check(runBlocking { repository.load(from, to, false) }.events == before.events)
+                setField("일정 제목", title)
+                setField("장소", "수정한 장소")
+                setField("메모", "수정한 메모")
+                if (calendar.source.name == "NAVER") {
+                    http.failWrites = true
+                    click("변경사항 저장"); await("캘린더 서버 오류 (503). 다시 시도해 주세요.")
+                    await(title)
+                    check(runBlocking { repository.load(from, to, false) }.events == before.events) { "Failed edit changed cache." }
+                    http.failWrites = false
+                } else click("하루 종일")
+                val began = SystemClock.uptimeMillis()
+                click("변경사항 저장"); await("수정 창 닫힘")
+                check(SystemClock.uptimeMillis() - began < 2500) { "Edit waited for background REPORT." }
+                check(http.releaseReports.count == 1L)
+                val after = runBlocking { repository.load(from, to, false) }
+                check(after.events.size == before.events.size) { "Edit created a duplicate event." }
+                val edited = after.events.single { it.title == title }
+                check(edited.calendarId == existing.calendarId)
+                check(edited.location == "수정한 장소" && edited.description == "수정한 메모")
+                if (calendar.source.name == "NAVER") {
+                    check(edited.href == existing.href && http.lastPutMatch == existing.etag)
+                    fun uid(raw: String) = biweekly.Biweekly.parse(raw).first().events.single().uid.value
+                    check(uid(edited.rawIcs) == uid(existing.rawIcs))
+                    check(edited.startMillis == existing.startMillis && edited.endMillis == existing.endMillis)
+                } else {
+                    check(edited.id.substringBefore('@') == existing.id.substringBefore('@'))
+                    check(edited.allDay && edited.startMillis == from && edited.endMillis == to)
+                }
+                pass("${calendar.source} editing preserves identity/count/account and fields; cancel, invalid input and retry preserve data; update finishes during blocked REPORT")
+            }
+            editThroughEditor(naverCalendar, "NaverSavedDuringSync")
+            editThroughEditor(googleCalendar, "GoogleSavedDuringSync")
             context.contentResolver.delete(fixtureCalendar!!, null, null)
             fixtureCalendar = null
             pass("real Naver and Google-provider event editors save and close within 2.5 seconds while REPORT stays blocked")
@@ -134,7 +192,7 @@ internal class LoginRegression(private val runner: Instrumentation) {
             runBlocking { withTimeout(15_000) { checkNotNull(sync).await() } }
             runBlocking {
                 val afterStale = repository.load(from, to, false)
-                check(afterStale.events.any { it.title == "NaverSavedDuringSync" })
+                check(afterStale.events.any { it.title == "NaverEditedDuringSync" })
                 check(repository.initialNaverSyncPending()) { "Stale REPORT was published after the save." }
                 val ready = repository.load(from, to, initialOnly = true)
                 check(ready.events.any { it.title == "LoginFixtureEvent" })
@@ -177,7 +235,7 @@ internal class LoginRegression(private val runner: Instrumentation) {
                 pass("switching Naver account removes only the old Naver cache and preserves Google selection")
 
                 val current = repository.load(from, to, initialOnly = true)
-                val created = current.events.single { it.title == "NaverSavedDuringSync" }
+                val created = current.events.single { it.title == "NaverEditedDuringSync" }
                 http.reportEntered = CountDownLatch(1); http.releaseReports = CountDownLatch(1)
                 val beforeDelete = scope.async { repository.load(from, to) }
                 check(http.reportEntered.await(10, TimeUnit.SECONDS))
@@ -256,9 +314,18 @@ internal class LoginRegression(private val runner: Instrumentation) {
     private fun click(text: String) {
         val deadline = SystemClock.uptimeMillis() + 5000
         do {
-            var node: AccessibilityNodeInfo? = await(text)
-            while (node != null && !node.isClickable) node = node.parent
-            if (node?.isEnabled == true && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return
+            await(text)
+            fun target(candidate: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+                if (candidate == null) return null
+                if (candidate.text?.toString() == text || candidate.contentDescription?.toString() == text) {
+                    var action: AccessibilityNodeInfo? = candidate
+                    while (action != null && !action.isClickable) action = action.parent
+                    if (action?.isEnabled == true) return action
+                }
+                for (i in 0 until candidate.childCount) target(candidate.getChild(i))?.let { return it }
+                return null
+            }
+            if (target(root())?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return
             SystemClock.sleep(100)
         } while (SystemClock.uptimeMillis() < deadline)
         error("Cannot click $text")
@@ -277,6 +344,8 @@ private class FixtureHttp : Interceptor {
     @Volatile var blockReports = false
     @Volatile var failAuthentication = false
     @Volatile var failReports = false
+    @Volatile var failWrites = false
+    @Volatile var lastPutMatch: String? = null
     val reports = AtomicInteger()
     private val saved = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile var reportEntered = CountDownLatch(1)
@@ -290,8 +359,9 @@ private class FixtureHttp : Interceptor {
             body = """<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/calendar/</d:href><d:propstat><d:prop><d:resourcetype><c:calendar/></d:resourcetype><d:displayname>Login fixture</d:displayname><d:current-user-privilege-set><d:privilege><d:write/></d:privilege></d:current-user-privilege-set><c:supported-calendar-component-set><c:comp name="VEVENT"/><c:comp name="VTODO"/></c:supported-calendar-component-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"""
         } else if (request.method == "PUT") {
             val buffer = Buffer(); request.body!!.writeTo(buffer)
-            saved[request.url.encodedPath] = buffer.readUtf8()
-            code = 201; body = ""
+            lastPutMatch = request.header("If-Match")
+            if (!failWrites) saved[request.url.encodedPath] = buffer.readUtf8()
+            code = if (failWrites) 503 else 201; body = ""
         } else if (request.method == "DELETE") {
             saved.remove(request.url.encodedPath)
             code = 204; body = ""
@@ -300,7 +370,7 @@ private class FixtureHttp : Interceptor {
             val prior = saved.toMap()
             reports.incrementAndGet()
             reportEntered.countDown()
-            if (blockReports) check(releaseReports.await(40, TimeUnit.SECONDS)) { "Fixture REPORT timed out." }
+            if (blockReports) check(releaseReports.await(60, TimeUnit.SECONDS)) { "Fixture REPORT timed out." }
             val buffer = Buffer()
             request.body!!.writeTo(buffer)
             val task = buffer.readUtf8().contains("VTODO")

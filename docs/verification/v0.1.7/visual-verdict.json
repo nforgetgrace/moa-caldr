@@ -1,0 +1,25 @@
+{
+  "iteration": 20,
+  "verdict": "pass",
+  "method": "Manual API 35 screenshot inspection and coordinate taps; no pixel comparison",
+  "evidence": [
+    "docs/screenshots/v0.1.7/agenda-edit-actions.png",
+    "docs/screenshots/v0.1.7/calendar-edit-actions.png",
+    "docs/screenshots/v0.1.7/editor-font130-keyboard.png",
+    "docs/screenshots/v0.1.7/editor-font130.png",
+    "docs/screenshots/v0.1.7/editor-keyboard.png",
+    "docs/screenshots/v0.1.7/editor.png",
+    "docs/screenshots/v0.1.7/readonly-editor.png"
+  ],
+  "findings": [
+    "Month event bar opens the existing editor; date number selects the day",
+    "Day and agenda rows show explicit edit or view actions",
+    "Fixed editor heading and save button remain visible with the keyboard at 100% and 130% font scale",
+    "Source account is readable; recurrence restriction is explained at the top"
+  ],
+  "limitations": [
+    "Dense month titles may ellipsize; full titles and larger actions are in the scrollable list",
+    "No Galaxy hardware or real cloud roundtrip"
+  ],
+  "complete": true
+}

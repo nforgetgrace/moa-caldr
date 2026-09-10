@@ -96,6 +96,17 @@ data class CalendarEvent(
     }
 }
 
+/** Shared by editor and entry actions so read-only entries never promise editing. */
+fun CalendarEvent.editRestriction(calendar: CalendarInfo?): String? = when {
+    task -> "할 일은 원본 캘린더에서 수정해 주세요."
+    recurring -> "반복 일정은 원본 캘린더에서 수정해 주세요."
+    calendar == null || calendar.id != calendarId || !calendar.writable || !calendar.syncEnabled || !calendar.supportsEvents ->
+        "이 캘린더는 앱에서 수정할 수 없어요. 원본 캘린더의 권한과 동기화 설정을 확인해 주세요."
+    rawIcs.contains("ATTENDEE", true) || rawIcs.contains("ORGANIZER", true) ->
+        "초대 일정은 원본 캘린더에서 수정해 주세요."
+    else -> null
+}
+
 data class EventDraft(
     val calendarId: String,
     val title: String,

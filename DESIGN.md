@@ -123,3 +123,10 @@
 - Every date remains a click target, including inside a spanning bar. Widget entry must select the actual tapped date and retain cached events while syncing. Source colors and silent refresh remain unchanged.
 - Plan: lock date-span/overlap/overflow semantics with unit tests, implement shared placement, render app and widget, then inspect emulator screenshots and test widget navigation before build/push.
 - Foreground saves/deletes must not wait for remote refresh REPORTs. Serialize refreshes separately and reject responses/errors older than a successful local write, account change or disconnect. Google provider writes remain independent of Naver network work.
+
+## Discoverable event editing · v0.1.7
+- Plan: expose the existing update operation through app calendar bars and explicit list actions, keep save visible, then verify updates preserve the source identity and do not create duplicates.
+- App event bars open the corresponding editor; date numbers and empty space select dates. This overrides the app-only whole-cell tap rule above. Native home widgets continue opening the actual tapped date.
+- Day and agenda rows show 수정 for editable events and 보기 for restricted entries. The editor heading is 일정 수정 and the primary action is 변경사항 저장.
+- Keep the header and save action outside the scrollable fields, including when the keyboard is open. Show account identity, preserve the original calendar, and keep the draft open when validation or saving fails.
+- Explain the specific read-only reason near the heading. Recurring events, invitations and tasks retain existing source-app restrictions.

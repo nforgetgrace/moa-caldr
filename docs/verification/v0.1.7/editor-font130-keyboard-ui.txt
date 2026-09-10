@@ -1,0 +1,17 @@
+드래그 핸들 [498,186][582,197] clickable=false
+일정 수정 [63,270][891,367] clickable=false
+닫기 [926,290][984,348] clickable=false
+내용을 바꾸고 변경사항을 저장해 주세요 [63,381][732,439] clickable=false
+20260910 [63,471][1017,645] clickable=true
+일정 제목 [105,469][270,528] clickable=false
+원본 캘린더 [63,677][1017,877] clickable=false
+G [124,746][160,808] clickable=false
+나의 캘린더 [216,714][453,785] clickable=false
+Google · moa-edit-fixture@example.test [216,796][866,840] clickable=false
+하루 종일 [63,921][880,995] clickable=false
+하루 종일 [880,916][1017,1000] clickable=false
+시작 [63,1081][168,1146] clickable=false
+2026. 9. 10 [200,1087][430,1140] clickable=false
+종료 [63,1229][168,1294] clickable=false
+2026. 9. 12 [200,1235][430,1288] clickable=false
+변경사항 저장 [412,1374][669,1439] clickable=false

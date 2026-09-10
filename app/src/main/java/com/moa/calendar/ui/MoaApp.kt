@@ -238,7 +238,7 @@ import java.util.Locale
                             FilterChip(taskView, { taskView = true }, label = { Text("할 일") })
                         }
                         if (taskView) TasksPage(snapshot.tasks.filter { it.calendarId !in hidden }, snapshot.calendars, snapshot.taskNotice, search, { selectedTask = it })
-                        else AgendaPage(events, selected, search, { select(it) }, ::openEvent)
+                        else AgendaPage(events, snapshot.calendars, selected, search, { select(it) }, ::openEvent)
                     }
                     2 -> WidgetPage(events) { agenda ->
                         val manager = AppWidgetManager.getInstance(context)
@@ -301,7 +301,7 @@ import java.util.Locale
             }
         }, busy = addingGoogle, error = googleConnectError)
     if (showEditor) EventEditor(selected, snapshot.calendars.filter { it.supportsEvents && it.syncEnabled }, editing, onDismiss = { showEditor = false },
-        onSave = { draft -> repository.save(draft, editing); showEditor = false; select(Instant.ofEpochMilli(draft.startMillis).atZone(if (draft.allDay) ZoneId.of("UTC") else ZoneId.systemDefault()).toLocalDate()); revision++; message("일정을 저장했어요.") },
+        onSave = { draft -> repository.save(draft, editing); showEditor = false; select(Instant.ofEpochMilli(draft.startMillis).atZone(if (draft.allDay) ZoneId.of("UTC") else ZoneId.systemDefault()).toLocalDate()); revision++; message(if (editing == null) "일정을 저장했어요." else "일정을 수정했어요.") },
         onDelete = { editing?.let { repository.delete(it) }; showEditor = false; revision++; message("일정을 삭제했어요.") })
     selectedTask?.let { task -> TaskDialog(task, snapshot.calendars.firstOrNull { it.id == task.calendarId }, onDismiss = { selectedTask = null }) }
     if (showNaver) NaverDialog(onDismiss = { showNaver = false }) { username, password ->
@@ -361,7 +361,7 @@ import java.util.Locale
             Spacer(Modifier.height(10.dp))
             Surface(Modifier.padding(horizontal = 14.dp), color = Color.White, shape = RoundedCornerShape(24.dp)) {
                 Column(Modifier.padding(horizontal = 5.dp, vertical = 8.dp)) {
-                    CalendarGrid(month, selected, events, mode == 1, showTitles = true, onDate = onDate)
+                    CalendarGrid(month, selected, events, mode == 1, showTitles = true, onDate = onDate, onEvent = onEvent)
                     HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 10.dp), color = LineColor)
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         snapshot.calendars.take(3).forEach { calendar ->
@@ -391,7 +391,7 @@ import java.util.Locale
         }
         items(events.filter { it.occursOn(selected) }.sortedWith(compareBy<CalendarEvent> { !it.allDay }.thenBy { it.startMillis }), key = { it.id }) { event ->
             val calendar = snapshot.calendars.firstOrNull { it.id == event.calendarId }
-            EventRow(event, calendar?.name.orEmpty(), onEvent, calendar?.accountLabel().orEmpty())
+            EventRow(event, calendar, onEvent)
         }
         item {
             if (snapshot.calendars.isEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 19.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onConnect).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -403,7 +403,7 @@ import java.util.Locale
     }
 }
 
-@Composable fun CalendarGrid(month: YearMonth, selected: LocalDate, events: List<CalendarEvent>, weekOnly: Boolean = false, showTitles: Boolean = false, onDate: (LocalDate) -> Unit = {}) {
+@Composable fun CalendarGrid(month: YearMonth, selected: LocalDate, events: List<CalendarEvent>, weekOnly: Boolean = false, showTitles: Boolean = false, onDate: (LocalDate) -> Unit = {}, onEvent: ((CalendarEvent) -> Unit)? = null) {
     val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
     val first = month.atDay(1)
     val gridStart = if (weekOnly) selected.minusDays((selected.dayOfWeek.value % 7).toLong()) else first.minusDays((first.dayOfWeek.value % 7).toLong())
@@ -422,6 +422,16 @@ import java.util.Locale
         val weekStart = gridStart.plusWeeks(index.toLong())
         val rowHeight = if (showTitles) maxOf(48f, 32 + 16 * fontScale * layout.rowCount).dp else 48.dp
         Box(Modifier.fillMaxWidth().height(rowHeight)) {
+            // Date targets sit behind app event actions; preview grids still select any tapped date.
+            Row(Modifier.matchParentSize()) {
+                repeat(7) { column ->
+                    val date = weekStart.plusDays(column.toLong())
+                    val dayEvents = layout.segments.filter { column in it.startColumn..it.endColumn }
+                    Box(Modifier.weight(1f).fillMaxHeight().clickable { onDate(date) }
+                        .semantics { contentDescription = "${date.monthValue}월 ${date.dayOfMonth}일, 일정 ${layout.eventCounts[column]}개" +
+                            dayEvents.joinToString(prefix = if (dayEvents.isEmpty()) "" else ": ") { it.event.title } })
+                }
+            }
             Column {
                 Row(Modifier.fillMaxWidth()) {
                     repeat(7) { column ->
@@ -450,7 +460,10 @@ import java.util.Locale
                                     topEnd = if (segment.continuesAfter) 0.dp else 3.dp,
                                     bottomEnd = if (segment.continuesAfter) 0.dp else 3.dp)
                                 Text(segment.label(), Modifier.weight((segment.endColumn - segment.startColumn + 1).toFloat())
-                                    .padding(horizontal = 1.dp).clip(shape).background(Color(segment.event.color).copy(alpha = .20f)).padding(horizontal = 2.dp),
+                                    .padding(horizontal = 1.dp).clip(shape).background(Color(segment.event.color).copy(alpha = .20f))
+                                    .then(if (onEvent != null) Modifier.clickable { onEvent(segment.event) }
+                                        .semantics { contentDescription = "${if (segment.event.task) "할 일" else "일정"} 열기: ${segment.event.title}" } else Modifier)
+                                    .padding(horizontal = 2.dp),
                                     fontSize = 10.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 nextColumn = segment.endColumn + 1
                             }
@@ -468,21 +481,15 @@ import java.util.Locale
                     }
                 }
             }
-            // Date targets cover the whole week, including the middle of a spanning event bar.
-            Row(Modifier.matchParentSize()) {
-                repeat(7) { column ->
-                    val date = weekStart.plusDays(column.toLong())
-                    val dayEvents = layout.segments.filter { column in it.startColumn..it.endColumn }
-                    Box(Modifier.weight(1f).fillMaxHeight().clickable { onDate(date) }
-                        .semantics { contentDescription = "${date.monthValue}월 ${date.dayOfMonth}일, 일정 ${layout.eventCounts[column]}개" +
-                            dayEvents.joinToString(prefix = if (dayEvents.isEmpty()) "" else ": ") { it.event.title } })
-                }
-            }
+
         }
     }
 }
 
-@Composable fun EventRow(event: CalendarEvent, calendarName: String = "", onEvent: (CalendarEvent) -> Unit, accountLabel: String = "") {
+@Composable fun EventRow(event: CalendarEvent, calendar: CalendarInfo? = null, onEvent: (CalendarEvent) -> Unit) {
+    val calendarName = calendar?.name.orEmpty()
+    val accountLabel = calendar?.accountLabel().orEmpty()
+    val action = if (event.editRestriction(calendar) == null) "수정" else "보기"
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp).clip(RoundedCornerShape(17.dp)).background(Color.White)
         .clickable { onEvent(event) }.padding(horizontal = 14.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.width(51.dp)) {
@@ -501,7 +508,10 @@ import java.util.Locale
             }
             if (accountLabel.isNotBlank()) Text(accountLabel, fontSize = 10.sp, color = Muted, modifier = Modifier.padding(top = 3.dp))
         }
-        if (calendarName.isNotBlank()) Text(calendarName.take(5), Modifier.padding(start = 6.dp).clip(RoundedCornerShape(6.dp)).background(Color(event.color).copy(alpha = .10f)).padding(horizontal = 7.dp, vertical = 4.dp), fontSize = 9.sp, color = Color(event.color))
+        TextButton(onClick = { onEvent(event) }, modifier = Modifier.padding(start = 4.dp)
+            .semantics { contentDescription = "일정 $action: ${event.title}" }, contentPadding = PaddingValues(horizontal = 10.dp)) {
+            Text(action, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -514,7 +524,7 @@ import java.util.Locale
     }
 }
 
-@Composable private fun AgendaPage(events: List<CalendarEvent>, selected: LocalDate, query: String, onDate: (LocalDate) -> Unit, onEvent: (CalendarEvent) -> Unit) {
+@Composable private fun AgendaPage(events: List<CalendarEvent>, calendars: List<CalendarInfo>, selected: LocalDate, query: String, onDate: (LocalDate) -> Unit, onEvent: (CalendarEvent) -> Unit) {
     val filtered = events.filter { (query.isNotBlank() || it.isUpcoming(selected.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())) &&
         (query.isBlank() || listOf(it.title, it.location, it.description).any { value -> value.contains(query, true) }) }
     LazyColumn(contentPadding = PaddingValues(bottom = 100.dp)) {
@@ -527,7 +537,7 @@ import java.util.Locale
         }
         filtered.sortedBy { it.startMillis }.groupBy { it.date() }.forEach { (date, dayEvents) ->
             item { Text(date.format(DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN)), Modifier.padding(start = 24.dp, top = 19.dp, bottom = 9.dp), fontSize = 13.sp, fontWeight = FontWeight.Bold) }
-            items(dayEvents, key = { it.id }) { EventRow(it, onEvent = onEvent) }
+            items(dayEvents, key = { it.id }) { EventRow(it, calendars.firstOrNull { calendar -> calendar.id == it.calendarId }, onEvent) }
         }
         if (filtered.isEmpty()) item { Text("표시할 일정이 없어요.", Modifier.fillMaxWidth().padding(40.dp), textAlign = TextAlign.Center, color = Muted) }
     }

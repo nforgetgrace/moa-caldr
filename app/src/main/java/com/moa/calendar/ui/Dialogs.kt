@@ -59,8 +59,9 @@ import java.time.format.DateTimeFormatter
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
-    val readOnly = existing != null && (existing.task || existing.recurring || calendars.none { it.id == existing.calendarId && it.writable } ||
-        existing.rawIcs.contains("ATTENDEE", true) || existing.rawIcs.contains("ORGANIZER", true))
+    val sourceCalendar = calendars.firstOrNull { it.id == calendarId }
+    val restriction = existing?.editRestriction(sourceCalendar)
+    val readOnly = restriction != null
 
     fun chooseDate(isStart: Boolean) {
         val value = if (isStart) startDate else endDate
@@ -76,39 +77,41 @@ import java.time.format.DateTimeFormatter
         }, time.hour, time.minute, true).show()
     }
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = CanvasColor) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).imePadding().padding(bottom = 24.dp)) {
+        Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 24.dp).padding(bottom = 16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (existing == null) "새로운 일정" else "일정 상세", fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f))
+                Text(if (existing == null) "새로운 일정" else if (readOnly) "일정 상세" else "일정 수정", modifier = Modifier.weight(1f), fontSize = 23.sp, fontWeight = FontWeight.Bold)
                 IconButton(onClick = onDismiss, enabled = !busy) { LineIcon("close", label = "닫기") }
             }
-            val sourceCalendar = calendars.firstOrNull { it.id == calendarId }
-            if (existing == null) Text("선택한 원본 캘린더에 저장해요", color = Muted, fontSize = 11.sp)
-            Spacer(Modifier.height(20.dp))
-            OutlinedTextField(title, { title = it }, label = { Text("일정 제목") }, modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
-            Spacer(Modifier.height(12.dp))
-            CalendarDestination(sourceCalendar, enabled = existing == null && !busy) {
-                focus.clearFocus()
-                keyboard?.hide()
-                menu = true
-            }
-            Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("하루 종일", Modifier.weight(1f)); Switch(allDay, { allDay = it }, enabled = !busy && !readOnly, modifier = Modifier.semantics { contentDescription = "하루 종일" })
-            }
-            listOf(true, false).forEach { isStart ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (isStart) "시작" else "종료", Modifier.width(40.dp), fontSize = 13.sp, color = Muted)
-                    TextButton(onClick = { chooseDate(isStart) }, enabled = !busy && !readOnly) { Text((if (isStart) startDate else endDate).format(DateTimeFormatter.ofPattern("yyyy. M. d"))) }
-                    Spacer(Modifier.weight(1f))
-                    if (!allDay) TextButton(onClick = { chooseTime(isStart) }, enabled = !busy && !readOnly) { Text((if (isStart) startTime else endTime).format(DateTimeFormatter.ofPattern("HH:mm"))) }
+            Text(restriction ?: if (existing == null) "선택한 원본 캘린더에 저장해요" else "내용을 바꾸고 변경사항을 저장해 주세요", color = Muted, fontSize = 12.sp)
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 12.dp)) {
+                OutlinedTextField(title, { title = it }, label = { Text("일정 제목") }, modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
+                Spacer(Modifier.height(12.dp))
+                CalendarDestination(sourceCalendar, enabled = existing == null && !busy) {
+                    focus.clearFocus()
+                    keyboard?.hide()
+                    menu = true
                 }
+                Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("하루 종일", Modifier.weight(1f)); Switch(allDay, { allDay = it }, enabled = !busy && !readOnly, modifier = Modifier.semantics { contentDescription = "하루 종일" })
+                }
+                listOf(true, false).forEach { isStart ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (isStart) "시작" else "종료", Modifier.width(40.dp), fontSize = 13.sp, color = Muted)
+                        TextButton(onClick = { chooseDate(isStart) }, enabled = !busy && !readOnly) { Text((if (isStart) startDate else endDate).format(DateTimeFormatter.ofPattern("yyyy. M. d"))) }
+                        Spacer(Modifier.weight(1f))
+                        if (!allDay) TextButton(onClick = { chooseTime(isStart) }, enabled = !busy && !readOnly) { Text((if (isStart) startTime else endTime).format(DateTimeFormatter.ofPattern("HH:mm"))) }
+                    }
+                }
+                OutlinedTextField(location, { location = it }, label = { Text("장소") }, leadingIcon = { LineIcon("pin", Muted) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp), singleLine = true, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
+                OutlinedTextField(description, { description = it }, label = { Text("메모") }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), minLines = 2, maxLines = 4, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
+                if (existing != null && !readOnly) TextButton(onClick = { confirmDelete = true }, Modifier.fillMaxWidth(), enabled = !busy) { Text("일정 삭제", color = MaterialTheme.colorScheme.error) }
             }
-            OutlinedTextField(location, { location = it }, label = { Text("장소") }, leadingIcon = { LineIcon("pin", Muted) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp), singleLine = true, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
-            OutlinedTextField(description, { description = it }, label = { Text("메모") }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), minLines = 2, maxLines = 4, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
-            if (readOnly) Text("반복·초대 일정 또는 읽기 전용 캘린더예요. 변경은 원본 캘린더에서 해 주세요.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 14.dp))
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
             if (!readOnly) {
+                HorizontalDivider(color = LineColor)
                 Button(onClick = {
+                    focus.clearFocus()
+                    keyboard?.hide()
                     scope.launch {
                         busy = true; error = ""
                         try {
@@ -119,11 +122,10 @@ import java.time.format.DateTimeFormatter
                         } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: "저장하지 못했어요." }
                         finally { busy = false }
                     }
-                }, Modifier.fillMaxWidth().padding(top = 20.dp).height(52.dp), enabled = !busy && calendarId.isNotBlank(), shape = RoundedCornerShape(16.dp)) {
+                }, Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 52.dp), enabled = !busy && calendarId.isNotBlank(), shape = RoundedCornerShape(16.dp)) {
                     if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
-                    else Text("일정 저장", fontWeight = FontWeight.Bold)
+                    else Text(if (existing == null) "일정 저장" else "변경사항 저장", fontWeight = FontWeight.Bold)
                 }
-                if (existing != null) TextButton(onClick = { confirmDelete = true }, Modifier.fillMaxWidth(), enabled = !busy) { Text("일정 삭제", color = MaterialTheme.colorScheme.error) }
             }
         }
     }
