@@ -142,3 +142,10 @@
 - While the app is resumed, reconcile Google calendar sync activity every two seconds and on status callbacks. Stop polling when paused or no account is available. Query status off the main thread; these checks must not start network syncs or reload calendar data.
 - A missed start/end notification must recover through the next status check. Keep the spinner visible for as long as the selected account is actually active; do not invent a completion timeout.
 - Preserve cached schedules, the existing refresh slot and all manual/periodic sync behavior. Verify missing callbacks, account changes and pause/resume with an isolated status source before testing on a real phone.
+
+## Recurrence and per-calendar appearance · v0.1.10
+- Event create/edit exposes 반복 없음, 매일, 매주, 매월, 매년 in a compact repeat row and a readable radio-choice dialog. The editor keeps the save action visible and preserves draft fields when selecting/dismissing repetition.
+- Editable recurring events display the original first event's date/time and explicitly say changes apply to the entire series. Preserve custom recurrence rules unless the user chooses a replacement. Exception-rich or unverified cached recurrence remains read-only with an explanation; this overrides the blanket recurring-event restriction in v0.1.7.
+- Store recurrence in Google Calendar Provider and CalDAV source data; keep local wall time across daylight-saving transitions. Monthly dates missing from a month and yearly leap-day dates follow calendar recurrence semantics and explain skipped dates.
+- Per-calendar color choices override the source defaults locally, keyed by source, account and calendar identity. Apply the choice consistently to calendars, events, tasks and both widgets, persist across sync/restart, and offer a default-color reset. Source defaults remain Naver lavender and Google green. Color changes are local preferences and do not start network synchronization.
+- Validate on an isolated emulator only; the Galaxy was released after v0.1.9 installation.

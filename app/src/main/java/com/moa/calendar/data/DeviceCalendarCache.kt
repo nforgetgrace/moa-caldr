@@ -27,7 +27,12 @@ internal data class DeviceCalendarSnapshot(
         } }).put("events", JSONArray().apply { events.forEach { e ->
             put(JSONObject().put("id", e.id).put("calendarId", e.calendarId).put("title", e.title)
                 .put("start", e.startMillis).put("end", e.endMillis).put("allDay", e.allDay)
-                .put("description", e.description).put("location", e.location).put("recurring", e.recurring))
+                .put("description", e.description).put("location", e.location).put("recurring", e.recurring)
+                .put("recurrenceRule", e.recurrenceRule)
+                .put("seriesStart", e.seriesStartMillis ?: JSONObject.NULL)
+                .put("seriesEnd", e.seriesEndMillis ?: JSONObject.NULL)
+                .put("timeZone", e.timeZone)
+                .put("recurrenceReadOnly", e.recurrenceReadOnly))
         } }).toString()
 
     companion object {
@@ -43,8 +48,15 @@ internal data class DeviceCalendarSnapshot(
             val events = json.getJSONArray("events").let { array -> (0 until array.length()).map { index ->
                 val e = array.getJSONObject(index)
                 val c = byId.getValue(e.getString("calendarId"))
+                val recurring = e.getBoolean("recurring")
+                val hasRecurrenceMetadata = e.has("recurrenceRule") || e.has("seriesStart") || e.has("seriesEnd")
                 CalendarEvent(e.getString("id"), c.id, e.getString("title"), e.getLong("start"), e.getLong("end"),
-                    e.getBoolean("allDay"), e.getString("description"), e.getString("location"), c.source, c.color, e.getBoolean("recurring"))
+                    e.getBoolean("allDay"), e.getString("description"), e.getString("location"), c.source, c.color, recurring,
+                    recurrenceRule = e.optString("recurrenceRule"),
+                    seriesStartMillis = if (e.isNull("seriesStart")) null else e.optLong("seriesStart"),
+                    seriesEndMillis = if (e.isNull("seriesEnd")) null else e.optLong("seriesEnd"),
+                    timeZone = e.optString("timeZone"),
+                    recurrenceReadOnly = e.optBoolean("recurrenceReadOnly", recurring && !hasRecurrenceMetadata))
             } }
             return DeviceCalendarSnapshot(calendars, events, SyncWindow(json.getLong("from"), json.getLong("to")))
         }

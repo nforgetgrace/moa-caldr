@@ -30,7 +30,7 @@ import java.time.format.DateTimeFormatter
     snapshot: CalendarSnapshot, naverConnected: Boolean, naverAccount: String, hidden: Set<String>,
     googleAccount: String?, hasCalendarPermission: Boolean,
     onGoogle: () -> Unit, onAccountSettings: () -> Unit, onNaver: () -> Unit, onDisconnect: () -> Unit,
-    onVisibility: (String) -> Unit, onRefresh: () -> Unit, onGoogleSync: () -> Unit, onEnableCalendar: (String) -> Unit,
+    onVisibility: (String) -> Unit, onColor: (CalendarInfo) -> Unit, onRefresh: () -> Unit, onGoogleSync: () -> Unit, onEnableCalendar: (String) -> Unit,
 ) {
     var disconnectDialog by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(top = 20.dp, bottom = 30.dp)) {
@@ -67,12 +67,18 @@ import java.time.format.DateTimeFormatter
                         if (calendars.isEmpty()) Text(emptyMessage, Modifier.padding(vertical = 18.dp), color = Muted, fontSize = 12.sp)
                         calendars.forEach { calendar ->
                             Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(9.dp).clip(CircleShape).background(Color(calendar.color)))
+                                Box(Modifier.size(28.dp).clip(CircleShape).clickable { onColor(calendar) }
+                                    .semantics { contentDescription = "${calendar.name} 색상 변경" }, contentAlignment = Alignment.Center) {
+                                    Box(Modifier.size(12.dp).clip(CircleShape).background(Color(calendar.color)))
+                                }
                                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                     Text(calendar.name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                                     Text(calendar.accountLabel() + if (!calendar.writable) " · 읽기 전용" else "", fontSize = 10.sp, color = Muted)
                                     if (!calendar.syncEnabled) Text("이 캘린더의 기기 동기화가 꺼져 있어요", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
                                     if (calendar.supportsTasks && !calendar.supportsEvents) Text("할 일 목록", fontSize = 10.sp, color = Muted)
+                                }
+                                TextButton(onClick = { onColor(calendar) }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                                    Text("색상", fontSize = 11.sp)
                                 }
                                 if (!calendar.syncEnabled && source == CalendarSource.GOOGLE) {
                                     TextButton(onClick = { onEnableCalendar(calendar.id) }) { Text("동기화 켜기", fontSize = 11.sp) }
@@ -103,7 +109,7 @@ import java.time.format.DateTimeFormatter
         }
         Spacer(Modifier.height(27.dp))
         Text("일정은 선택한 원본 캘린더에 저장됩니다. Google과 네이버 간 자동 복제는 하지 않습니다. 네이버 비밀번호는 기기에 암호화해 보관합니다.", color = Muted, fontSize = 11.sp)
-        Text("MOA  0.1.9  ·  Made for your everyday", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 18.dp))
+        Text("MOA  0.1.10  ·  Made for your everyday", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(top = 18.dp))
     }
     if (disconnectDialog) AlertDialog(onDismissRequest = { disconnectDialog = false }, title = { Text("네이버 연결을 해제할까요?") },
         text = { Text("이 기기의 로그인 정보와 저장된 네이버 일정만 지웁니다. 네이버에 있는 원본 일정은 유지됩니다.") },

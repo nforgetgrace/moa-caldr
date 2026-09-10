@@ -303,6 +303,30 @@ internal class LoginRegression(private val runner: Instrumentation) {
                 repository.connectNaver("other-user", "fixture-password", FixtureHttp.SERVER)
                 pass("disconnect proceeds during REPORT; stale results and errors cannot restore the old account")
 
+                // Exercise recurring writes against the controlled CalDAV server and cache publication.
+                val recurrenceEnd = from + 800 * 86_400_000L
+                for (frequency in com.moa.calendar.data.RepeatFrequency.entries.filter { it.rule.isNotBlank() }) {
+                    val draft = EventDraft(naverCalendar.id, "CalDavRepeat${frequency.name}", from + 3_600_000L,
+                        from + 7_200_000L, recurrenceRule = frequency.rule, timeZone = "Asia/Seoul")
+                    repository.save(draft)
+                    check(http.lastPutBody.contains("RRULE:${frequency.rule}"))
+                    val instances = repository.load(from, recurrenceEnd, false).events.filter { it.title == draft.title }
+                    check(instances.size >= 2)
+                    val later = instances[1]
+                    check(later.seriesStartMillis == draft.startMillis && later.seriesEndMillis == draft.endMillis)
+                    repository.save(draft.copy(title = draft.title + "Edited"), later)
+                    check(http.lastPutMatch == later.etag)
+                    val updated = repository.load(from, recurrenceEnd, false).events.filter { it.title == draft.title + "Edited" }
+                    check(updated.size == instances.size && updated.all { it.href == later.href })
+                    check(updated.first().startMillis == draft.startMillis)
+                    val singleDraft = draft.copy(title = draft.title + "Single", recurrenceRule = "")
+                    repository.save(singleDraft, updated[1])
+                    val single = repository.load(from, recurrenceEnd, false).events.single { it.title == singleDraft.title }
+                    check(!single.recurring && single.startMillis == draft.startMillis)
+                    repository.delete(single)
+                }
+                pass("CalDAV four recurrence frequencies reach PUT, expand, update the same resource from a later occurrence, and convert back to one event")
+
                 // Register while holding the production sync lock, inspect then cancel before any network can run.
                 val mutex = CalendarRepository::class.java.getDeclaredField("lock").apply { isAccessible = true }.get(null) as kotlinx.coroutines.sync.Mutex
                 mutex.lock()
@@ -396,6 +420,7 @@ private class FixtureHttp : Interceptor {
     @Volatile var failTasks = false
     val bodyQueries = AtomicInteger()
     @Volatile var lastPutMatch: String? = null
+    @Volatile var lastPutBody: String = ""
     val reports = AtomicInteger()
     private val saved = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile var reportEntered = CountDownLatch(1)
@@ -410,7 +435,8 @@ private class FixtureHttp : Interceptor {
         } else if (request.method == "PUT") {
             val buffer = Buffer(); request.body!!.writeTo(buffer)
             lastPutMatch = request.header("If-Match")
-            if (!failWrites) saved[request.url.encodedPath] = buffer.readUtf8()
+            lastPutBody = buffer.readUtf8()
+            if (!failWrites) saved[request.url.encodedPath] = lastPutBody
             code = if (failWrites) 503 else 201; body = ""
         } else if (request.method == "GET") {
             val data = saved[request.url.encodedPath] ?: when (request.url.encodedPath) {

@@ -1,0 +1,2 @@
+PASS: Editor selects none/daily/weekly/monthly/yearly, edits the original series dates from a later occurrence, preserves custom rules, and explains exception restrictions.
+

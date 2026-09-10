@@ -6,6 +6,15 @@ import java.time.ZoneId
 
 enum class CalendarSource { GOOGLE, NAVER, DEVICE }
 
+enum class RepeatFrequency(val label: String, val rule: String) {
+    NONE("반복 없음", ""), DAILY("매일", "FREQ=DAILY"), WEEKLY("매주", "FREQ=WEEKLY"),
+    MONTHLY("매월", "FREQ=MONTHLY"), YEARLY("매년", "FREQ=YEARLY");
+
+    companion object {
+        fun fromRule(rule: String): RepeatFrequency? = entries.firstOrNull { it.rule == rule.uppercase() }
+    }
+}
+
 fun CalendarSource.displayColor(original: Int): Int = when (this) {
     CalendarSource.NAVER -> 0xFFB39DDB.toInt()
     CalendarSource.GOOGLE -> 0xFF03A86B.toInt()
@@ -22,6 +31,7 @@ data class CalendarInfo(
     val syncEnabled: Boolean = true,
     val supportsEvents: Boolean = true,
     val supportsTasks: Boolean = false,
+    val defaultColor: Int = color,
 )
 
 fun CalendarInfo.accountLabel(): String {
@@ -79,6 +89,11 @@ data class CalendarEvent(
     val etag: String = "",
     val rawIcs: String = "",
     val task: Boolean = false,
+    val recurrenceRule: String = "",
+    val seriesStartMillis: Long? = null,
+    val seriesEndMillis: Long? = null,
+    val timeZone: String = "",
+    val recurrenceReadOnly: Boolean = false,
 ) {
     fun occursOn(date: LocalDate, zone: ZoneId = ZoneId.systemDefault()): Boolean {
         val actualZone = if (allDay) ZoneId.of("UTC") else zone
@@ -99,7 +114,8 @@ data class CalendarEvent(
 /** Shared by editor and entry actions so read-only entries never promise editing. */
 fun CalendarEvent.editRestriction(calendar: CalendarInfo?): String? = when {
     task -> "할 일은 원본 캘린더에서 수정해 주세요."
-    recurring -> "반복 일정은 원본 캘린더에서 수정해 주세요."
+    recurring && (recurrenceReadOnly || seriesStartMillis == null || seriesEndMillis == null) ->
+        "개별 변경·예외가 있거나 원본 반복 정보를 확인할 수 없는 일정은 원본 캘린더에서 수정해 주세요."
     calendar == null || calendar.id != calendarId || !calendar.writable || !calendar.syncEnabled || !calendar.supportsEvents ->
         "이 캘린더는 앱에서 수정할 수 없어요. 원본 캘린더의 권한과 동기화 설정을 확인해 주세요."
     rawIcs.contains("ATTENDEE", true) || rawIcs.contains("ORGANIZER", true) ->
@@ -115,6 +131,8 @@ data class EventDraft(
     val allDay: Boolean = false,
     val description: String = "",
     val location: String = "",
+    val recurrenceRule: String = "",
+    val timeZone: String = ZoneId.systemDefault().id,
 )
 
 data class CalendarSnapshot(

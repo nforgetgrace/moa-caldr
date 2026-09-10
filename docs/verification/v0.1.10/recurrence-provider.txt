@@ -1,0 +1,2 @@
+PASS: Provider recurrence save/read for all frequencies, whole-series update, nonrepeat transitions, all-day duration/timezone conversion, exception readonly and stale guard verified.
+

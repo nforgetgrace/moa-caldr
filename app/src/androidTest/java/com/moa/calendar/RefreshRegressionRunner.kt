@@ -26,6 +26,9 @@ class RefreshRegressionRunner : Instrumentation() {
     }
 
     override fun onStart() {
+        if (scenario == "calendar_colors") { CalendarColorRegression(this).run(); return }
+        if (scenario == "recurrence_provider") { ProviderRecurrenceRegression(this).run(); return }
+        if (scenario == "recurrence_editor") { RecurrenceEditorRegression(this).run(); return }
         if (scenario == "login") { LoginRegression(this).run(); return }
         if (scenario == "google_status") { GoogleSyncRegression(this).run(); return }
         val result = Bundle()

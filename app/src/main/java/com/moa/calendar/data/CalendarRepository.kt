@@ -25,6 +25,7 @@ class CalendarRepository internal constructor(context: Context, private val crea
     private val prefs = app.getSharedPreferences("moa_calendar", Context.MODE_PRIVATE)
     private val device = DeviceCalendars(app)
     private val vault = CredentialVault(app)
+    private val colors = CalendarColors(prefs)
 
     init {
         // Upgrade old installations without touching any real calendar or credential.
@@ -48,6 +49,10 @@ class CalendarRepository internal constructor(context: Context, private val crea
         if (visible) hidden.remove(id) else hidden.add(id)
         prefs.edit().putStringSet("hidden", hidden).apply()
     }
+    fun setCalendarDisplayColor(calendar: CalendarInfo, color: Int?) = colors.set(calendar, color)
+    fun defaultCalendarDisplayColor(calendar: CalendarInfo): Int = colors.defaultColor(calendar)
+    fun hasCalendarDisplayColor(calendar: CalendarInfo): Boolean = colors.isCustomized(calendar)
+    fun applyDisplayColors(snapshot: CalendarSnapshot): CalendarSnapshot = colors.apply(snapshot)
 
     suspend fun load(from: Long, to: Long, refreshRemote: Boolean = true, initialOnly: Boolean = false): CalendarSnapshot = withContext(Dispatchers.IO) {
         if (refreshRemote) refreshNaver(from, to, initialOnly)
@@ -77,11 +82,14 @@ class CalendarRepository internal constructor(context: Context, private val crea
         if (naverConnected()) (state["last_sync_error"] as? String)?.let { errors += it }
         val account = state["google_account"] as? String
         deviceRead.error?.let { errors += it }
-        val allDeviceCalendars = deviceRead.snapshot.calendars
+        val allDeviceCalendars = colors.applyCalendars(deviceRead.snapshot.calendars)
         val deviceCalendars = calendarsForGoogleAccount(allDeviceCalendars, account)
         val deviceIds = deviceCalendars.filter { it.syncEnabled }.map { it.id }.toSet()
-        val deviceEvents = deviceRead.snapshot.events.filter { it.calendarId in deviceIds && it.startMillis < to && it.endMillis.coerceAtLeast(it.startMillis + 1) > from }
-        val remoteCalendars = readCalendars(remote)
+        val deviceColorByCalendar = allDeviceCalendars.associate { it.id to it.color }
+        val deviceEvents = deviceRead.snapshot.events
+            .filter { it.calendarId in deviceIds && it.startMillis < to && it.endMillis.coerceAtLeast(it.startMillis + 1) > from }
+            .map { event -> event.copy(color = deviceColorByCalendar[event.calendarId] ?: event.color) }
+        val remoteCalendars = colors.applyCalendars(readCalendars(remote))
         val remoteEvents = mutableListOf<CalendarEvent>()
         for (calendar in remoteCalendars) {
             try { readResources(calendar.id, remote).forEach { remoteEvents += IcsCodec.parse(it, calendar, from, to) } }

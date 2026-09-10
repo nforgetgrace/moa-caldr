@@ -48,6 +48,29 @@ class DeviceCalendarCacheTest {
             event.copy(id = "device:3@300", startMillis = 300, endMillis = 400)))
         assertEquals(extended, DeviceCalendarSnapshot.decode(extended.encode()))
     }
+    @Test fun `persistent cache roundtrips recurrence metadata`() {
+        val repeated = event.copy(
+            recurring = true,
+            recurrenceRule = "FREQ=WEEKLY",
+            seriesStartMillis = 100,
+            seriesEndMillis = 200,
+            timeZone = "Asia/Seoul",
+            recurrenceReadOnly = false,
+        )
+        assertEquals(repeated, DeviceCalendarSnapshot.decode(cached.copy(events = listOf(repeated)).encode()).events.single())
+    }
+    @Test fun `old repeated cache without metadata becomes read only fallback`() {
+        val old = JSONObject(cached.copy(events = listOf(event.copy(recurring = true))).encode())
+        val item = old.getJSONArray("events").getJSONObject(0)
+        item.remove("recurrenceRule")
+        item.remove("seriesStart")
+        item.remove("seriesEnd")
+        item.remove("timeZone")
+        item.remove("recurrenceReadOnly")
+        val restored = DeviceCalendarSnapshot.decode(old.toString()).events.single()
+        assertTrue(restored.recurring)
+        assertTrue(restored.recurrenceReadOnly)
+    }
     @Test fun `account filtering also applies to fallback data`() {
         val second = calendar.copy(id = "device:2", account = "two@example.test")
         val snapshot = CalendarSnapshot(listOf(calendar, second), listOf(event, event.copy(calendarId = second.id)))
@@ -57,5 +80,12 @@ class DeviceCalendarCacheTest {
     }
     @Test(expected = CancellationException::class) fun `cancelled read is not published as fallback`() {
         readDeviceCalendars(cached, 0, 1000, { throw CancellationException() }, { _, _, _ -> emptyList() })
+    }
+    @Test fun `provider duration parser handles event durations`() {
+        assertEquals(86_400_000L, DeviceCalendars.durationMillis("P1D"))
+        assertEquals(604_800_000L, DeviceCalendars.durationMillis("P1W"))
+        assertEquals(1_209_600_000L, DeviceCalendars.durationMillis("P2W"))
+        assertEquals(3_600_000L, DeviceCalendars.durationMillis("PT1H"))
+        assertNull(DeviceCalendars.durationMillis(""))
     }
 }

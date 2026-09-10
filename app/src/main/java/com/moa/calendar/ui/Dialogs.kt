@@ -4,9 +4,12 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -17,6 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -43,19 +47,24 @@ import java.time.format.DateTimeFormatter
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    val zone = if (existing?.allDay == true) ZoneOffset.UTC else ZoneId.systemDefault()
-    val start = existing?.let { Instant.ofEpochMilli(it.startMillis).atZone(zone) }
-    val end = existing?.let { Instant.ofEpochMilli(it.endMillis).atZone(zone) }
+    val eventZone = existing?.takeUnless { it.allDay }?.timeZone?.takeIf { it.isNotBlank() }
+        ?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.systemDefault()
+    val zone = if (existing?.allDay == true) ZoneOffset.UTC else eventZone
+    val editingSeries = existing?.recurring == true && existing.editRestriction(calendars.firstOrNull { it.id == existing.calendarId }) == null
+    val start = existing?.let { Instant.ofEpochMilli(if (editingSeries) it.seriesStartMillis!! else it.startMillis).atZone(zone) }
+    val end = existing?.let { Instant.ofEpochMilli(if (editingSeries) it.seriesEndMillis!! else it.endMillis).atZone(zone) }
     var title by remember { mutableStateOf(existing?.title.orEmpty()) }
     var location by remember { mutableStateOf(existing?.location.orEmpty()) }
     var description by remember { mutableStateOf(existing?.description.orEmpty()) }
     var allDay by remember { mutableStateOf(existing?.allDay ?: false) }
     var startDate by remember { mutableStateOf(start?.toLocalDate() ?: selected) }
     var endDate by remember { mutableStateOf(if (existing?.allDay == true) end!!.toLocalDate().minusDays(1) else end?.toLocalDate() ?: selected) }
-    var startTime by remember { mutableStateOf(start?.toLocalTime() ?: LocalTime.of(10, 0)) }
-    var endTime by remember { mutableStateOf(end?.toLocalTime() ?: LocalTime.of(11, 0)) }
+    var startTime by remember { mutableStateOf(start?.takeUnless { existing.allDay }?.toLocalTime() ?: LocalTime.of(10, 0)) }
+    var endTime by remember { mutableStateOf(end?.takeUnless { existing.allDay }?.toLocalTime() ?: LocalTime.of(11, 0)) }
     var calendarId by remember { mutableStateOf(existing?.calendarId ?: calendars.firstOrNull { it.writable }?.id.orEmpty()) }
     var menu by remember { mutableStateOf(false) }
+    var repeatMenu by remember { mutableStateOf(false) }
+    var recurrenceRule by remember { mutableStateOf(existing?.recurrenceRule.orEmpty()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -82,7 +91,7 @@ import java.time.format.DateTimeFormatter
                 Text(if (existing == null) "새로운 일정" else if (readOnly) "일정 상세" else "일정 수정", modifier = Modifier.weight(1f), fontSize = 23.sp, fontWeight = FontWeight.Bold)
                 IconButton(onClick = onDismiss, enabled = !busy) { LineIcon("close", label = "닫기") }
             }
-            Text(restriction ?: if (existing == null) "선택한 원본 캘린더에 저장해요" else "내용을 바꾸고 변경사항을 저장해 주세요", color = Muted, fontSize = 12.sp)
+            Text(restriction ?: if (editingSeries) "전체 반복 일정에 적용돼요 · 첫 일정의 날짜를 표시합니다" else if (existing == null) "선택한 원본 캘린더에 저장해요" else "내용을 바꾸고 변경사항을 저장해 주세요", color = Muted, fontSize = 12.sp)
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 12.dp)) {
                 OutlinedTextField(title, { title = it }, label = { Text("일정 제목") }, modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
                 Spacer(Modifier.height(12.dp))
@@ -102,9 +111,31 @@ import java.time.format.DateTimeFormatter
                         if (!allDay) TextButton(onClick = { chooseTime(isStart) }, enabled = !busy && !readOnly) { Text((if (isStart) startTime else endTime).format(DateTimeFormatter.ofPattern("HH:mm"))) }
                     }
                 }
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, LineColor), modifier = Modifier.padding(top = 8.dp)) {
+                    Row(Modifier.fillMaxWidth().clickable(enabled = !busy && !readOnly, role = Role.Button) {
+                        focus.clearFocus(); keyboard?.hide(); repeatMenu = true
+                    }.semantics { contentDescription = "반복 설정" }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LineIcon("sync", Muted, Modifier.size(20.dp))
+                        Text("반복", Modifier.weight(1f).padding(start = 10.dp), fontSize = 14.sp)
+                        Text(RepeatFrequency.fromRule(recurrenceRule)?.label ?: "사용자 지정 반복", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        if (!readOnly) LineIcon("right", Muted, Modifier.padding(start = 10.dp).size(16.dp))
+                    }
+                }
+                if (recurrenceRule.isNotBlank()) Text(
+                    (if (RepeatFrequency.fromRule(recurrenceRule) != null) "시작일 기준으로 종료일 없이 반복돼요." else "기존 반복 주기와 종료 조건을 유지해요.") + " 종료 날짜·시간은 한 번의 일정 길이입니다.",
+                    Modifier.padding(top = 7.dp), color = Muted, fontSize = 11.sp)
+                if (editingSeries && recurrenceRule.isBlank()) Text("반복을 해제하면 첫 일정 하나만 남아요.",
+                    Modifier.padding(top = 7.dp), color = Muted, fontSize = 11.sp)
+                when (RepeatFrequency.fromRule(recurrenceRule)) {
+                    RepeatFrequency.MONTHLY -> Text("매월 같은 날짜 · 해당 날짜가 없는 달은 건너뛰어요.", Modifier.padding(top = 4.dp), color = Muted, fontSize = 11.sp)
+                    RepeatFrequency.YEARLY -> Text("매년 같은 날짜 · 2월 29일은 윤년에 반복돼요.", Modifier.padding(top = 4.dp), color = Muted, fontSize = 11.sp)
+                    else -> Unit
+                }
+                if (!allDay && eventZone != ZoneId.systemDefault()) Text("시간대 · ${eventZone.id}", Modifier.padding(top = 5.dp), color = Muted, fontSize = 11.sp)
                 OutlinedTextField(location, { location = it }, label = { Text("장소") }, leadingIcon = { LineIcon("pin", Muted) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp), singleLine = true, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
                 OutlinedTextField(description, { description = it }, label = { Text("메모") }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), minLines = 2, maxLines = 4, enabled = !busy && !readOnly, shape = RoundedCornerShape(14.dp))
-                if (existing != null && !readOnly) TextButton(onClick = { confirmDelete = true }, Modifier.fillMaxWidth(), enabled = !busy) { Text("일정 삭제", color = MaterialTheme.colorScheme.error) }
+                if (existing != null && !readOnly && !existing.recurring) TextButton(onClick = { confirmDelete = true }, Modifier.fillMaxWidth(), enabled = !busy) { Text("일정 삭제", color = MaterialTheme.colorScheme.error) }
             }
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
             if (!readOnly) {
@@ -115,9 +146,10 @@ import java.time.format.DateTimeFormatter
                     scope.launch {
                         busy = true; error = ""
                         try {
-                            val from = if (allDay) startDate.atStartOfDay(ZoneOffset.UTC) else startDate.atTime(startTime).atZone(ZoneId.systemDefault())
-                            val to = if (allDay) endDate.plusDays(1).atStartOfDay(ZoneOffset.UTC) else endDate.atTime(endTime).atZone(ZoneId.systemDefault())
-                            val draft = EventDraft(calendarId, title, from.toInstant().toEpochMilli(), to.toInstant().toEpochMilli(), allDay, description, location)
+                            val from = if (allDay) startDate.atStartOfDay(ZoneOffset.UTC) else startDate.atTime(startTime).atZone(eventZone)
+                            val to = if (allDay) endDate.plusDays(1).atStartOfDay(ZoneOffset.UTC) else endDate.atTime(endTime).atZone(eventZone)
+                            val draft = EventDraft(calendarId, title, from.toInstant().toEpochMilli(), to.toInstant().toEpochMilli(), allDay, description, location,
+                                recurrenceRule = recurrenceRule, timeZone = if (allDay) "UTC" else eventZone.id)
                             validateDraft(draft); onSave(draft)
                         } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: "저장하지 못했어요." }
                         finally { busy = false }
@@ -130,12 +162,43 @@ import java.time.format.DateTimeFormatter
         }
     }
     if (menu) CalendarSelectionDialog(calendars, calendarId, onDismiss = { menu = false }) { id -> calendarId = id; menu = false }
+    if (repeatMenu) RepeatSelectionDialog(recurrenceRule, onDismiss = { repeatMenu = false }) { recurrenceRule = it; repeatMenu = false }
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("일정을 삭제할까요?") },
         text = { Text("‘${existing?.title}’ 일정이 원본 캘린더에서도 삭제됩니다.") },
         confirmButton = { TextButton(onClick = {
             confirmDelete = false
             scope.launch { busy = true; try { onDelete() } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message ?: "삭제하지 못했어요." } finally { busy = false } }
         }) { Text("삭제", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("취소") } })
+}
+
+@Composable private fun RepeatSelectionDialog(rule: String, onDismiss: () -> Unit, onSelect: (String) -> Unit) {
+    var replacement by remember { mutableStateOf<String?>(null) }
+    AlertDialog(onDismissRequest = onDismiss, containerColor = CanvasColor,
+        title = { Text("일정 반복", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                val choices = RepeatFrequency.entries.map { it.label to it.rule }.let {
+                    if (RepeatFrequency.fromRule(rule) == null) it + ("기존 반복 유지" to rule) else it
+                }
+                choices.forEach { (label, value) ->
+                    Row(Modifier.fillMaxWidth().selectable(rule == value, role = Role.RadioButton, onClick = {
+                        if (RepeatFrequency.fromRule(rule) == null && value != rule) replacement = value else onSelect(value)
+                    })
+                        .heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, Modifier.weight(1f), fontSize = 16.sp, color = Ink)
+                        RadioButton(selected = rule == value, onClick = null)
+                    }
+                }
+            }
+        }, confirmButton = { TextButton(onClick = onDismiss) { Text("닫기") } })
+    replacement?.let { value ->
+        AlertDialog(onDismissRequest = { replacement = null }, containerColor = CanvasColor,
+            title = { Text("기존 반복 설정을 바꿀까요?") },
+            text = { Text(if (value.isBlank()) "기존 반복을 해제하고 첫 일정 하나만 남깁니다. 변경사항을 저장할 때 적용돼요."
+                else "기존의 주기·요일·종료 조건을 해제하고 ‘${RepeatFrequency.fromRule(value)?.label}’ 종료일 없는 반복으로 바꿉니다. 변경사항을 저장할 때 전체 반복에 적용돼요.") },
+            confirmButton = { TextButton(onClick = { onSelect(value) }) { Text("반복 변경") } },
+            dismissButton = { TextButton(onClick = { replacement = null }) { Text("유지하기") } })
+    }
 }
 
 @Composable fun NaverDialog(onDismiss: () -> Unit, onConnect: suspend (String, String) -> Unit) {

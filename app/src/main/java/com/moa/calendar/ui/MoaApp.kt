@@ -76,6 +76,7 @@ import java.util.Locale
     var selectedTask by remember { mutableStateOf<CalendarTask?>(null) }
     var showGoogle by remember { mutableStateOf(false) }
     var showGoogleConnect by rememberSaveable { mutableStateOf(false) }
+    var colorCalendar by remember { mutableStateOf<CalendarInfo?>(null) }
     var addingGoogle by remember { mutableStateOf(false) }
     var googleConnectError by remember { mutableStateOf("") }
     var selectedGoogleAccount by remember { mutableStateOf(repository.selectedGoogleAccount()) }
@@ -147,7 +148,7 @@ import java.util.Locale
         selectedGoogleAccount = repository.selectedGoogleAccount()
         hasCalendarPermission = DeviceCalendars(context).hasReadPermission()
         try {
-            snapshot = repository.load(from, to, false)
+            snapshot = repository.applyDisplayColors(repository.load(from, to, false))
             cacheLoaded = true
             WidgetUpdater.update(context)
         } catch (e: Exception) {
@@ -162,10 +163,10 @@ import java.util.Locale
         try {
             // Show committed local data before starting any remote request.
             if (!cacheLoaded) {
-                snapshot = repository.load(from, to, false)
+                snapshot = repository.applyDisplayColors(repository.load(from, to, false))
                 cacheLoaded = true
             }
-            snapshot = repository.load(from, to, true)
+            snapshot = repository.applyDisplayColors(repository.load(from, to, true))
             WidgetUpdater.update(context)
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -258,6 +259,7 @@ import java.util.Locale
                         }, onNaver = { showNaver = true },
                         onDisconnect = { scope.launch { repository.disconnectNaver(); CalendarSyncJob.schedule(context); revision++ } },
                         onVisibility = { id -> repository.setVisible(id, id in hidden); hidden = repository.hiddenCalendars(); scope.launch { WidgetUpdater.update(context) } },
+                        onColor = { colorCalendar = it },
                         onRefresh = ::refreshManually, onGoogleSync = ::requestGoogleSync,
                         onEnableCalendar = { id -> scope.launch {
                             try { repository.enableGoogleCalendar(id); revision++; requestGoogleSync() }
@@ -301,6 +303,15 @@ import java.util.Locale
                 googleConnectError = "Google 로그인 화면을 열지 못했어요. 기기의 Google 계정 설정을 확인해 주세요."
             }
         }, busy = addingGoogle, error = googleConnectError)
+    colorCalendar?.let { calendar ->
+        CalendarColorDialog(calendar, repository.defaultCalendarDisplayColor(calendar), repository.hasCalendarDisplayColor(calendar),
+            onDismiss = { colorCalendar = null }) { color ->
+            repository.setCalendarDisplayColor(calendar, color)
+            snapshot = repository.applyDisplayColors(snapshot)
+            colorCalendar = null
+            scope.launch { WidgetUpdater.update(context) }
+        }
+    }
     if (showEditor) EventEditor(selected, snapshot.calendars.filter { it.supportsEvents && it.syncEnabled }, editing, onDismiss = { showEditor = false },
         onSave = { draft -> repository.save(draft, editing); showEditor = false; select(Instant.ofEpochMilli(draft.startMillis).atZone(if (draft.allDay) ZoneId.of("UTC") else ZoneId.systemDefault()).toLocalDate()); revision++; message(if (editing == null) "일정을 저장했어요." else "일정을 수정했어요.") },
         onDelete = { editing?.let { repository.delete(it) }; showEditor = false; revision++; message("일정을 삭제했어요.") })

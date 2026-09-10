@@ -87,9 +87,46 @@ END:VEVENT""")
         assertTrue(raw.contains("UID:a"))
         assertTrue(raw.contains("SUMMARY:New"))
     }
-    @Test(expected = IllegalArgumentException::class) fun `rejects editing recurring instances`() {
+    @Test fun `edits simple recurring series without rebasing to clicked occurrence`() {
         val existing = parse("BEGIN:VEVENT\nUID:a\nDTSTART:20260909T010000Z\nDTEND:20260909T020000Z\nRRULE:FREQ=DAILY;COUNT=1\nSUMMARY:A\nEND:VEVENT").single()
-        IcsCodec.write(EventDraft(calendar.id, "New", existing.startMillis, existing.endMillis), existing)
+        val raw = IcsCodec.write(EventDraft(calendar.id, "New", existing.seriesStartMillis!!, existing.seriesEndMillis!!,
+            recurrenceRule = existing.recurrenceRule), existing)
+        val roundtrip = IcsCodec.parse(DavResource("test", "v2", raw), calendar, instant("2026-09-01T00:00:00Z"), instant("2026-10-01T00:00:00Z")).single()
+        assertEquals(existing.seriesStartMillis, roundtrip.seriesStartMillis)
+        assertEquals("FREQ=DAILY;COUNT=1", roundtrip.recurrenceRule)
+        assertEquals("New", roundtrip.title)
+    }
+    @Test fun `preserves custom recurring rule when editing details`() {
+        val existing = parse("BEGIN:VEVENT\nUID:a\nDTSTART:20260909T010000Z\nDTEND:20260909T020000Z\nRRULE:FREQ=MONTHLY;COUNT=3;BYMONTHDAY=9\nSUMMARY:A\nEND:VEVENT").first()
+        val raw = IcsCodec.write(EventDraft(calendar.id, "New", existing.seriesStartMillis!!, existing.seriesEndMillis!!,
+            recurrenceRule = existing.recurrenceRule), existing)
+        val roundtrip = IcsCodec.parse(DavResource("test", "v2", raw), calendar, instant("2026-09-01T00:00:00Z"), instant("2026-12-31T00:00:00Z")).first()
+        assertEquals("FREQ=MONTHLY;COUNT=3;BYMONTHDAY=9", roundtrip.recurrenceRule)
+        assertEquals("New", roundtrip.title)
+    }
+    @Test fun `custom byday rule serializes as recurrence text`() {
+        val existing = parse("BEGIN:VEVENT\nUID:a\nDTSTART:20260909T010000Z\nDTEND:20260909T020000Z\nRRULE:FREQ=MONTHLY;COUNT=2;BYDAY=2WE;BYSETPOS=1\nSUMMARY:A\nEND:VEVENT").first()
+        assertEquals("FREQ=MONTHLY;COUNT=2;BYDAY=2WE;BYSETPOS=1", existing.recurrenceRule)
+        val raw = IcsCodec.write(EventDraft(calendar.id, "New", existing.seriesStartMillis!!, existing.seriesEndMillis!!,
+            recurrenceRule = existing.recurrenceRule), existing)
+        assertTrue(raw.contains("RRULE:FREQ=MONTHLY;COUNT=2;BYDAY=2WE;BYSETPOS=1"))
+    }
+    @Test(expected = IllegalArgumentException::class) fun `rejects recurring exceptions for editing`() {
+        val existing = parse("""BEGIN:VEVENT
+UID:weekly
+DTSTART:20260902T010000Z
+DTEND:20260902T020000Z
+RRULE:FREQ=WEEKLY;COUNT=2
+SUMMARY:원래 일정
+END:VEVENT
+BEGIN:VEVENT
+UID:weekly
+RECURRENCE-ID:20260909T010000Z
+DTSTART:20260910T020000Z
+DTEND:20260910T030000Z
+SUMMARY:변경된 일정
+END:VEVENT""").first()
+        IcsCodec.write(EventDraft(calendar.id, "New", existing.startMillis, existing.endMillis, recurrenceRule = existing.recurrenceRule), existing)
     }
     @Test(expected = IllegalArgumentException::class) fun `rejects invalid ranges`() { validateDraft(EventDraft("a", "Title", 1000, 900)) }
     @Test(expected = IllegalArgumentException::class) fun `rejects empty title`() { validateDraft(EventDraft("a", "  ", 1000, 2000)) }
