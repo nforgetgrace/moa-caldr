@@ -1,0 +1,21 @@
+{
+  "iteration": 21,
+  "verdict": "pass",
+  "method": "Manual API 35 screenshot inspection plus real app/widget instrumentation; no pixel comparison",
+  "evidence": [
+    "docs/screenshots/v0.1.8/widget-entry-sync.png",
+    "docs/screenshots/v0.1.8/manual-sync.png",
+    "docs/screenshots/v0.1.8/calendar-idle.png"
+  ],
+  "findings": [
+    "The same top refresh slot contains the spinner during sync and the refresh icon when idle; layout does not shift",
+    "Cached month entry and full day row remain visible with Naver lavender color and source account",
+    "Real home-widget entry reuses the recent activity and retains schedules during refresh",
+    "Repository background sync starts/stops the shared spinner after success, failure and cancellation"
+  ],
+  "limitations": [
+    "Controlled HTTPS responses and emulator Calendar Provider; no real Naver or Google cloud roundtrip",
+    "No Galaxy hardware or real Google sync adapter active-state validation"
+  ],
+  "complete": true
+}

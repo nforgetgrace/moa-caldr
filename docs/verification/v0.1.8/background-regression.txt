@@ -1,0 +1,3 @@
+READY: background sync retains the event; spinner visibility verified.
+PASS: repository refresh failure preserves cached events.
+PASS: cached calendars/events and widget updates stay available during a held sync lock; confirmed empty cache removes deleted events.

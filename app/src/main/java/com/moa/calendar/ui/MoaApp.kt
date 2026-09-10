@@ -68,8 +68,7 @@ import java.util.Locale
     var hidden by remember { mutableStateOf(repository.hiddenCalendars()) }
     var loading by remember { mutableStateOf(false) }
     var cacheLoaded by remember { mutableStateOf(false) }
-    var manualRefreshRevision by remember { mutableIntStateOf(-1) }
-    var showManualSpinner by remember { mutableStateOf(false) }
+    val naverSyncing by CalendarRepository.naverSyncing.collectAsState()
     var refreshGeneration by remember { mutableIntStateOf(0) }
     var showEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<CalendarEvent?>(null) }
@@ -81,6 +80,11 @@ import java.util.Locale
     var googleConnectError by remember { mutableStateOf("") }
     var selectedGoogleAccount by remember { mutableStateOf(repository.selectedGoogleAccount()) }
     var hasCalendarPermission by remember { mutableStateOf(DeviceCalendars(context).hasReadPermission()) }
+    val googleSyncing = remember(externalRevision, resumed, selectedGoogleAccount, snapshot.calendars) {
+        resumed && DeviceCalendars(context).isGoogleSyncActive(selectedGoogleAccount?.let { listOf(it) }
+            ?: snapshot.calendars.filter { it.source == CalendarSource.GOOGLE }.map { it.account })
+    }
+    val syncing = loading || naverSyncing || googleSyncing
     var showNaver by remember { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
     var searching by rememberSaveable { mutableStateOf(false) }
@@ -103,7 +107,7 @@ import java.util.Locale
         search = ""
     }
     fun message(text: String) { scope.launch { snackbar.showSnackbar(text) } }
-    fun refreshManually() { if (!loading) { revision++; manualRefreshRevision = revision } }
+    fun refreshManually() { if (!syncing) { revision++ } }
     fun addEvent() {
         if (snapshot.calendars.none { it.writable && it.syncEnabled && it.supportsEvents }) { page = 3; message("먼저 일정을 저장할 캘린더를 연결해 주세요.") }
         else { editing = null; showEditor = true }
@@ -116,7 +120,7 @@ import java.util.Locale
         scope.launch {
             try { repository.requestGoogleSync(); message("선택한 계정에 동기화를 요청했어요. 도착하는 일정은 자동 반영됩니다.") }
             catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; message(e.message ?: "기기 동기화 설정을 확인해 주세요.") }
-            revision++; manualRefreshRevision = revision
+            revision++
         }
     }
     fun selectGoogle(account: String?) {
@@ -153,8 +157,6 @@ import java.util.Locale
     LaunchedEffect(monthString, revision, resumed) {
         if (!resumed) return@LaunchedEffect
         val generation = ++refreshGeneration
-        showManualSpinner = manualRefreshRevision == revision
-        manualRefreshRevision = -1
         loading = true
         try {
             // Show committed local data before starting any remote request.
@@ -168,11 +170,12 @@ import java.util.Locale
             if (e is kotlinx.coroutines.CancellationException) throw e
             message(e.message ?: "일정을 불러오지 못했어요.")
         } finally {
-            if (generation == refreshGeneration) { loading = false; showManualSpinner = false }
+            if (generation == refreshGeneration) { loading = false }
         }
     }
+    val currentSyncing by rememberUpdatedState(syncing)
     LaunchedEffect(resumed, naverConnected) {
-        if (resumed && naverConnected) while (true) { delay(60_000); if (!loading) revision++ }
+        if (resumed && naverConnected) while (true) { delay(60_000); if (!currentSyncing) revision++ }
     }
 
     Scaffold(
@@ -209,10 +212,7 @@ import java.util.Locale
                     Spacer(Modifier.width(9.dp))
                     Text("일상을 한곳에", fontSize = 11.sp, color = Muted)
                     Spacer(Modifier.weight(1f))
-                    if (showManualSpinner) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(Modifier.size(18.dp).semantics { contentDescription = "수동 동기화 중" }, strokeWidth = 2.dp)
-                    }
-                    else IconButton(onClick = ::refreshManually, modifier = Modifier.size(44.dp), enabled = !loading) { LineIcon("sync", Muted, label = "일정 새로고침") }
+                    SyncRefreshAction(syncing, ::refreshManually)
                     IconButton(onClick = { searching = !searching; page = 1 }, Modifier.size(44.dp)) { LineIcon("search", label = "일정 검색") }
                 }
                 if (snapshot.errors.isNotEmpty()) {
@@ -311,6 +311,12 @@ import java.util.Locale
         CalendarSyncJob.schedule(context)
         message("네이버 계정이 연결됐어요. 일정은 백그라운드에서 가져옵니다.")
     }
+}
+
+@Composable fun SyncRefreshAction(syncing: Boolean, onRefresh: () -> Unit) {
+    if (syncing) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(Modifier.size(18.dp).semantics { contentDescription = "동기화 중" }, strokeWidth = 2.dp)
+    } else IconButton(onClick = onRefresh, modifier = Modifier.size(44.dp)) { LineIcon("sync", Muted, label = "일정 새로고침") }
 }
 
 @Composable fun BrandMark() {

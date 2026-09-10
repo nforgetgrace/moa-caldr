@@ -53,6 +53,10 @@ class DeviceCalendars(private val context: Context) {
         return result
     }
 
+    fun isGoogleSyncActive(accountNames: List<String>): Boolean = accountNames.distinct().filter { it.isNotBlank() }.any { name ->
+        runCatching { ContentResolver.isSyncActive(Account(name, "com.google"), CalendarContract.AUTHORITY) }.getOrDefault(false)
+    }
+
     fun googleSyncNotice(accountName: String?): String {
         if (accountName == null) return "사용할 Google 계정을 선택해 주세요."
         if (!ContentResolver.getSyncAdapterTypes().any { it.accountType == "com.google" && it.authority == CalendarContract.AUTHORITY })

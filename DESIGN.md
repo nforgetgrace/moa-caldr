@@ -130,3 +130,9 @@
 - Day and agenda rows show 수정 for editable events and 보기 for restricted entries. The editor heading is 일정 수정 and the primary action is 변경사항 저장.
 - Keep the header and save action outside the scrollable fields, including when the keyboard is open. Show account identity, preserve the original calendar, and keep the draft open when validation or saving fails.
 - Explain the specific read-only reason near the heading. Recurring events, invitations and tasks retain existing source-app restrictions.
+
+## Faster sync and visible progress · v0.1.8
+- Use cached strong ETags to avoid downloading unchanged event/task bodies. Fetch independent components concurrently with a limit of three; preserve complete snapshots and write revision protection. Keep the existing date coverage and sync frequency.
+- Latest user instruction overrides manual-only spinner rules: show the top spinner while app refresh, Naver background sync, or the selected Google account's Android sync is active; remove it after completion, failure or cancellation. Keep all cached schedules visible.
+- Use the existing 44dp refresh slot and 18dp spinner. Google status comes from Android active-sync notifications; pending jobs alone must not leave a permanent spinner.
+- Verify network payload/latency with a controlled HTTP fixture, then verify repeated spinner start/stop and cache retention through real app/widget entry and background repository jobs.

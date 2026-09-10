@@ -23,10 +23,7 @@ class CalDavClient(
     server: String,
     private val username: String,
     private val password: String,
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .followRedirects(false).followSslRedirects(false)
-        .connectTimeout(15, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
-        .callTimeout(45, TimeUnit.SECONDS).build(),
+    private val http: OkHttpClient = sharedHttp,
     private val allowLocalHttpForTests: Boolean = false,
 ) {
     private val root = server.trim().toHttpUrl()
@@ -69,38 +66,85 @@ class CalDavClient(
         return calendars
     }
 
-    fun fetch(calendar: CalendarInfo, from: Long, to: Long): List<DavResource> {
+    fun fetch(calendar: CalendarInfo, from: Long, to: Long, cached: List<DavResource> = emptyList()): List<DavResource> {
         if (!calendar.supportsEvents) return emptyList()
         val format = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
-        return fetchComponent(calendar, """<c:comp-filter name="VEVENT"><c:time-range start="${format.format(Instant.ofEpochMilli(from))}" end="${format.format(Instant.ofEpochMilli(to))}"/></c:comp-filter>""")
+        return fetchComponent(calendar, """<c:comp-filter name="VEVENT"><c:time-range start="${format.format(Instant.ofEpochMilli(from))}" end="${format.format(Instant.ofEpochMilli(to))}"/></c:comp-filter>""", cached)
     }
 
-    fun fetchTasks(calendar: CalendarInfo): List<DavResource> {
+    fun fetchTasks(calendar: CalendarInfo, cached: List<DavResource> = emptyList()): List<DavResource> {
         if (!calendar.supportsTasks) return emptyList()
         // No time range: tasks can be overdue or have no DTSTART/DUE at all.
-        return fetchComponent(calendar, """<c:comp-filter name="VTODO"/>""")
+        return fetchComponent(calendar, """<c:comp-filter name="VTODO"/>""", cached)
     }
 
-    private fun fetchComponent(calendar: CalendarInfo, filter: String): List<DavResource> {
+    private fun fetchComponent(calendar: CalendarInfo, filter: String, cached: List<DavResource>): List<DavResource> {
+        val url = safeUrl(root, calendar.id)
+        // RFC 4791 §8.2.1.3: compare URI/ETag pairs before downloading changed bodies.
+        val incremental = cached.any { strongEtag(it.etag) && it.ics.isNotBlank() }
+        val entries = try { queryResources(url, filter, includeData = !incremental) }
+        catch (e: DavHttpException) {
+            if (incremental && e.code in listOf(400, 405, 501)) return fetchComponent(calendar, filter, emptyList())
+            throw e
+        }
+        val prior = cached.associateBy { it.href }
+        val resolved = entries.mapNotNull { entry ->
+            when {
+                entry.ics.isNotBlank() -> entry
+                strongEtag(entry.etag) && prior[entry.href]?.etag == entry.etag -> prior[entry.href]?.takeIf { it.ics.isNotBlank() }
+                else -> null
+            }
+        }.associateBy { it.href }.toMutableMap()
+        val missing = entries.filter { it.href !in resolved }
+        if (incremental && missing.size > 1) {
+            try {
+                missing.chunked(50).forEach { batch ->
+                    multiget(url, batch.map { it.href }).forEach { resolved[it.href] = it }
+                }
+            } catch (e: DavHttpException) {
+                // Keep compatibility with servers that implement only calendar-query / GET.
+                if (e.code in listOf(400, 403, 405, 501)) return fetchComponent(calendar, filter, emptyList())
+                throw e
+            }
+        } else missing.forEach { entry -> resolved[entry.href] = downloadResource(safeUrl(url, entry.href)) }
+        // Only a complete successful listing can remove resources absent from this query window.
+        return entries.map { resolved.getValue(it.href) }
+    }
+
+    private fun queryResources(url: HttpUrl, filter: String, includeData: Boolean): List<DavResource> {
         val body = """<?xml version="1.0" encoding="UTF-8"?>
             <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
-              <d:prop><d:getetag/><c:calendar-data/></d:prop>
+              <d:prop><d:getetag/>${if (includeData) "<c:calendar-data/>" else "<d:resourcetype/>"}</d:prop>
               <c:filter><c:comp-filter name="VCALENDAR">$filter</c:comp-filter></c:filter>
             </c:calendar-query>""".trimIndent()
-        val url = safeUrl(root, calendar.id)
-        val xml = request(url, "REPORT", body, mapOf("Depth" to "1")).first
+        return resourceEntries(url, request(url, "REPORT", body, mapOf("Depth" to "1")).first)
+    }
+
+    private fun multiget(url: HttpUrl, hrefs: List<String>): List<DavResource> {
+        val body = """<?xml version="1.0" encoding="UTF-8"?>
+            <c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+              <d:prop><d:getetag/><c:calendar-data/></d:prop>
+              ${hrefs.joinToString("") { "<d:href>${it.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")}</d:href>" }}
+            </c:calendar-multiget>""".trimIndent()
+        val entries = resourceEntries(url, request(url, "REPORT", body, emptyMap()).first)
+        if (entries.map { it.href }.toSet() != hrefs.toSet()) throw IOException("서버가 일부 일정을 반환하지 않았어요. 기존 일정을 유지합니다.")
+        return entries.map { if (it.ics.isNotBlank()) it else downloadResource(safeUrl(url, it.href)) }
+    }
+
+    private fun resourceEntries(url: HttpUrl, xml: String): List<DavResource> {
+        val seen = mutableSetOf<String>()
         return parseResponses(xml, strict = true).mapNotNull { (href, prop) ->
             val resourceUrl = safeUrl(url, href)
-            // Some servers include the queried collection alongside its event resources.
-            // A collection has no calendar-data and must not be treated as a failed event.
             val isQueriedCollection = resourceUrl.encodedPath.trimEnd('/') == url.encodedPath.trimEnd('/') && resourceUrl.query == url.query
             val resourceType = prop.getElementsByTagNameNS(DAV, "resourcetype").item(0) as? Element
             if (isQueriedCollection || resourceType?.getElementsByTagNameNS(DAV, "collection")?.length?.let { it > 0 } == true) return@mapNotNull null
-            val ics = prop.text(CAL, "calendar-data")
-            if (ics.isNotBlank()) DavResource(resourceUrl.toString(), prop.text(DAV, "getetag"), ics)
-            else downloadResource(resourceUrl)
+            if (!seen.add(resourceUrl.toString())) throw IOException("일정 목록에 중복된 주소가 있어요. 기존 일정을 유지합니다.")
+            DavResource(resourceUrl.toString(), prop.text(DAV, "getetag"), prop.text(CAL, "calendar-data"))
         }
     }
+
+    private fun strongEtag(value: String): Boolean = value.length >= 2 && value.first() == '"' && value.last() == '"' &&
+        value.substring(1, value.length - 1).all { it != '"' && it.code >= 0x21 && it.code != 0x7f }
 
     private fun downloadResource(url: HttpUrl): DavResource {
         // CalDAV resources can be read by GET when REPORT supplies only href/getetag.
@@ -136,7 +180,7 @@ class CalDavClient(
     private fun request(url: HttpUrl, method: String, body: String?, headers: Map<String, String>, type: String = "application/xml; charset=utf-8", redirects: Int = 0): Pair<String, String> {
         val builder = Request.Builder().url(url).method(method, body?.toRequestBody(type.toMediaType()))
             .header("Authorization", Credentials.basic(username, password, Charsets.UTF_8))
-            .header("User-Agent", "MoaCalendar/0.1.7 (Android; CalDAV)")
+            .header("User-Agent", "MoaCalendar/0.1.8 (Android; CalDAV)")
         headers.forEach { (key, value) -> builder.header(key, value) }
         http.newCall(builder.build()).execute().use { response ->
             if (response.code in listOf(301, 302, 307, 308)) {
@@ -146,11 +190,11 @@ class CalDavClient(
             }
             when (response.code) {
                 401 -> throw IOException("로그인에 실패했어요. 아이디와 앱 비밀번호를 확인해 주세요.")
-                403 -> throw IOException("서버가 접근을 허용하지 않아요. 네이버의 Android CalDAV 지원 제한일 수 있어요.")
+                403 -> throw DavHttpException(403, "서버가 접근을 허용하지 않아요. 네이버의 Android CalDAV 지원 제한일 수 있어요.")
                 409, 412 -> throw IOException("다른 곳에서 변경된 일정이에요. 새로고침 후 다시 확인해 주세요.")
                 429 -> throw IOException("요청이 많아 잠시 쉬고 있어요. 잠시 후 다시 시도해 주세요.")
             }
-            if (!response.isSuccessful) throw IOException("캘린더 서버 오류 (${response.code}). 다시 시도해 주세요.")
+            if (!response.isSuccessful) throw DavHttpException(response.code)
             val source = response.body?.source()
             if (source != null && source.request(MAX_RESPONSE + 1) && source.buffer.size > MAX_RESPONSE) throw IOException("일정 응답이 너무 커요. 기간을 줄여 주세요.")
             return (source?.readUtf8() ?: "") to response.header("ETag", "").orEmpty()
@@ -164,7 +208,14 @@ class CalDavClient(
         return url
     }
 
+    private class DavHttpException(val code: Int, message: String = "캘린더 서버 오류 ($code). 다시 시도해 주세요.") : IOException(message)
+
     companion object {
+        // Share sockets/TLS sessions, never credentials (Authorization is set per request).
+        private val sharedHttp = OkHttpClient.Builder()
+            .followRedirects(false).followSslRedirects(false)
+            .connectTimeout(15, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
+            .callTimeout(45, TimeUnit.SECONDS).build()
         private const val DAV = "DAV:"
         private const val CAL = "urn:ietf:params:xml:ns:caldav"
         private const val MAX_RESPONSE = 8L * 1024 * 1024

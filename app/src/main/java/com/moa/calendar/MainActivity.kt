@@ -1,5 +1,6 @@
 package com.moa.calendar
 
+import android.content.ContentResolver
 import android.content.SharedPreferences
 import android.content.Intent
 import android.database.ContentObserver
@@ -25,6 +26,8 @@ class MainActivity : ComponentActivity() {
     private var widgetDate by mutableStateOf<String?>(null)
     private var widgetOpenRevision by mutableIntStateOf(0)
     private var observing = false
+    private var syncObserver: Any? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) { revision++ }
     }
@@ -50,6 +53,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        syncObserver = ContentResolver.addStatusChangeListener(ContentResolver.SYNC_OBSERVER_TYPE_ACTIVE) {
+            mainHandler.post { if (resumed) revision++ }
+        }
         updateCalendarAccess()
     }
     private fun updateCalendarAccess() {
@@ -66,10 +72,12 @@ class MainActivity : ComponentActivity() {
     }
     override fun onPause() {
         resumed = false
+        syncObserver?.let { ContentResolver.removeStatusChangeListener(it) }; syncObserver = null
         if (observing) { contentResolver.unregisterContentObserver(observer); observing = false }
         super.onPause()
     }
     override fun onDestroy() {
+        syncObserver?.let { ContentResolver.removeStatusChangeListener(it) }; syncObserver = null
         if (observing) contentResolver.unregisterContentObserver(observer)
         preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         super.onDestroy()

@@ -1,0 +1,8 @@
+{
+  "remote_cache_empty": true,
+  "task_cache_empty": true,
+  "naver_credentials_removed": true,
+  "provider_fixture_calendars_removed": true,
+  "installed_version": "0.1.8 (9)",
+  "provider_verification": "adb shell content query: No result found."
+}

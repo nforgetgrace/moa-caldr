@@ -17,6 +17,7 @@ import com.moa.calendar.data.CalDavClient
 import com.moa.calendar.data.CalendarRepository
 import com.moa.calendar.data.DeviceCalendars
 import com.moa.calendar.data.EventDraft
+import com.moa.calendar.ui.SyncRefreshAction
 import com.moa.calendar.ui.EventEditor
 import com.moa.calendar.ui.MoaTheme
 import com.moa.calendar.ui.NaverDialog
@@ -66,7 +67,11 @@ internal class LoginRegression(private val runner: Instrumentation) {
                             open = false
                             // This scope survives dismissal of NaverDialog and leaving the activity.
                             sync = scope.async { repository.load(from, to, initialOnly = true); Unit }
-                        } else Text("로그인 완료")
+                        } else androidx.compose.foundation.layout.Column {
+                            Text("로그인 완료")
+                            val running by CalendarRepository.naverSyncing.collectAsState()
+                            SyncRefreshAction(running) {}
+                        }
                     }
                 }
             }
@@ -75,6 +80,8 @@ internal class LoginRegression(private val runner: Instrumentation) {
             click("연결하기")
             check(http.reportEntered.await(10, TimeUnit.SECONDS)) { "Initial sync did not start." }
             await("로그인 완료")
+            await("동기화 중")
+            check(CalendarRepository.naverSyncing.value)
             check(find(root(), "네이버 캘린더 연결") == null) { "Login dialog still open during REPORT." }
             check(repository.initialNaverSyncPending())
             check(prefs.getLong("last_sync", 0) == 0L)
@@ -203,10 +210,51 @@ internal class LoginRegression(private val runner: Instrumentation) {
                 check(http.reports.get() == reports) { "Completed initial sync fetched twice." }
                 pass("first sync finishes after leaving the activity; events/tasks publish together; completed initial job skips duplicate fetch")
 
+                val previousTasks = prefs.getString("remote_tasks", null)
+                val bodiesBefore = http.bodyQueries.get()
+                http.failTasks = true
+                val taskFailure = repository.load(from, to)
+                check(taskFailure.events.any { it.title == "LoginFixtureEvent" })
+                check(prefs.getString("remote_tasks", null) == previousTasks)
+                check(taskFailure.taskNotice.contains("할 일 조회를 완료하지 못했어요."))
+                http.failTasks = false
+                val refreshed = repository.load(from, to)
+                check(refreshed.taskNotice.contains("할 일 1개"))
+                check(http.bodyQueries.get() == bodiesBefore) { "Warm sync downloaded unchanged bodies." }
+                pass("warm repository sync requests only versions; task-only failure retains tasks and events, and retry recovers")
+
+                context.startActivity(Intent(context, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                runner.waitForIdleSync()
+                runner.runOnMainSync {
+                    activity!!.setContent { MoaTheme {
+                        val running by CalendarRepository.naverSyncing.collectAsState()
+                        SyncRefreshAction(running) {}
+                    } }
+                }
+                await("일정 새로고침")
+                for (outcome in listOf("success", "failure", "cancel")) {
+                    http.reportEntered = CountDownLatch(1); http.releaseReports = CountDownLatch(1)
+                    http.failReports = outcome == "failure"
+                    val background = scope.async { repository.load(from, to) }
+                    check(http.reportEntered.await(10, TimeUnit.SECONDS))
+                    await("동기화 중")
+                    check(CalendarRepository.naverSyncing.value)
+                    if (outcome == "cancel") background.cancel()
+                    http.releaseReports.countDown()
+                    if (outcome == "cancel") background.join() else background.await()
+                    check(!CalendarRepository.naverSyncing.value)
+                    await("일정 새로고침")
+                    check(repository.load(from, to, false).events.any { it.title == "NaverEditedDuringSync" })
+                    http.failReports = false
+                }
+                pass("background sync spinner starts each time and stops after success, failure and cancellation while edited events remain cached")
+
                 val remote = prefs.getString("remote", null)
                 val tasks = prefs.getString("remote_tasks", null)
+                val reportsBeforeReconnect = http.reports.get()
                 repository.connectNaver("fixture-user", "new-fixture-password", FixtureHttp.SERVER)
-                check(http.reports.get() == reports) { "Reauthentication downloaded events." }
+                check(http.reports.get() == reportsBeforeReconnect) { "Reauthentication downloaded events." }
                 check(prefs.getString("remote", null) == remote && prefs.getString("remote_tasks", null) == tasks)
                 check(repository.initialNaverSyncPending())
                 pass("same-account reconnect verifies access without REPORT and retains existing events/tasks")
@@ -345,6 +393,8 @@ private class FixtureHttp : Interceptor {
     @Volatile var failAuthentication = false
     @Volatile var failReports = false
     @Volatile var failWrites = false
+    @Volatile var failTasks = false
+    val bodyQueries = AtomicInteger()
     @Volatile var lastPutMatch: String? = null
     val reports = AtomicInteger()
     private val saved = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -362,6 +412,14 @@ private class FixtureHttp : Interceptor {
             lastPutMatch = request.header("If-Match")
             if (!failWrites) saved[request.url.encodedPath] = buffer.readUtf8()
             code = if (failWrites) 503 else 201; body = ""
+        } else if (request.method == "GET") {
+            val data = saved[request.url.encodedPath] ?: when (request.url.encodedPath) {
+                "/calendar/event.ics" -> baseIcs(false)
+                "/calendar/task.ics" -> baseIcs(true)
+                else -> null
+            }
+            bodyQueries.incrementAndGet()
+            code = if (data == null) 404 else 200; body = data.orEmpty()
         } else if (request.method == "DELETE") {
             saved.remove(request.url.encodedPath)
             code = 204; body = ""
@@ -373,17 +431,24 @@ private class FixtureHttp : Interceptor {
             if (blockReports) check(releaseReports.await(60, TimeUnit.SECONDS)) { "Fixture REPORT timed out." }
             val buffer = Buffer()
             request.body!!.writeTo(buffer)
-            val task = buffer.readUtf8().contains("VTODO")
-            val date = LocalDate.now().toString().replace("-", "")
-            val ics = if (task) "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:task\r\nSUMMARY:LoginFixtureTask\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
-                else "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:event\r\nDTSTART;VALUE=DATE:$date\r\nSUMMARY:LoginFixtureEvent\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-            code = if (failReports) 503 else 207
+            val query = buffer.readUtf8()
+            val task = query.contains("VTODO")
+            val includeData = query.contains("calendar-data")
+            if (includeData) bodyQueries.incrementAndGet()
+            val ics = baseIcs(task)
+            code = if (failReports || (task && failTasks)) 503 else 207
             val entries = (mapOf("/calendar/${if (task) "task" else "event"}.ics" to ics) + if (task) emptyMap() else prior).entries.joinToString("") { (href, data) ->
-                """<d:response><d:href>$href</d:href><d:propstat><d:prop><d:getetag>"fixture"</d:getetag><c:calendar-data><![CDATA[$data]]></c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
+                """<d:response><d:href>$href</d:href><d:propstat><d:prop><d:getetag>"fixture"</d:getetag>${if (includeData) "<c:calendar-data><![CDATA[$data]]></c:calendar-data>" else "<d:resourcetype/>"}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"""
             }
             body = """<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">$entries</d:multistatus>"""
         }
         return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code).message("Fixture").header("ETag", "\"fixture\"")
             .body(body.toResponseBody("application/xml".toMediaType())).build()
     }
+    private fun baseIcs(task: Boolean): String {
+        val date = LocalDate.now().toString().replace("-", "")
+        return if (task) "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:task\r\nSUMMARY:LoginFixtureTask\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+            else "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:event\r\nDTSTART;VALUE=DATE:$date\r\nSUMMARY:LoginFixtureEvent\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    }
+
 }

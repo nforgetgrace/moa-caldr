@@ -4,6 +4,8 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -110,20 +112,26 @@ class CalendarRepository internal constructor(context: Context, private val crea
             val request = lock.withLock {
                 if (!naverConnected() || (initialOnly && !initialNaverSyncPending())) null else {
                     revision = remoteRevision
-                    vault.read() to SyncWindow.read(JSONObject(prefs.getString("remote", "{}")!!), from, to)
+                    val remote = JSONObject(prefs.getString("remote", "{}")!!)
+                    val tasks = JSONObject(prefs.getString("remote_tasks", "{}")!!)
+                    val previousCalendars = readCalendars(remote)
+                    NaverRefreshInput(vault.read(), SyncWindow.read(remote, from, to),
+                        previousCalendars.associate { it.id to readResources(it.id, remote) },
+                        previousCalendars.associate { it.id to readTaskResources(it.id, tasks) })
                 }
             } ?: return@withLock
-            val (credentials, window) = request
-            val client = createClient(credentials.server, credentials.username, credentials.password)
-            // Slow REPORTs serialize only other refreshes, never foreground event writes.
-            val calendars = client.discover()
-            val resources = calendars.associateWith { client.fetch(it, window.from, window.to) }
-            resources.forEach { (calendar, data) -> data.forEach { IcsCodec.parse(it, calendar, window.from, window.to) } }
-            val tasks = fetchTasks(client, calendars)
-            lock.withLock {
-                // A save/delete/reconnect after this read began makes its response stale.
-                if (remoteRevision == revision) storeRemote(calendars, resources, tasks, window)
-            }
+            val (credentials, window, cachedEvents, cachedTasks) = request
+            naverRefreshing.value = true
+            try {
+                val client = createClient(credentials.server, credentials.username, credentials.password)
+                // Slow REPORTs serialize only other refreshes, never foreground event writes.
+                val calendars = client.discover()
+                val fetched = fetchNaverSnapshot(client, calendars, window, cachedEvents, cachedTasks)
+                lock.withLock {
+                    // A save/delete/reconnect after this read began makes its response stale.
+                    if (remoteRevision == revision) storeRemote(calendars, fetched.events, fetched.tasks, window)
+                }
+            } finally { naverRefreshing.value = false }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             lock.withLock {
@@ -214,17 +222,6 @@ class CalendarRepository internal constructor(context: Context, private val crea
         return (0 until array.length()).map { array.getJSONObject(it).let { o -> DavResource(o.getString("href"), o.optString("etag"), o.getString("ics")) } }
     }
 
-    private fun fetchTasks(client: CalDavClient, calendars: List<CalendarInfo>): Result<Map<CalendarInfo, List<DavResource>>> {
-        return try {
-            val resources = calendars.filter { it.supportsTasks }.associateWith { client.fetchTasks(it) }
-            resources.forEach { (calendar, data) -> data.forEach { TaskCodec.parse(it, calendar) } }
-            Result.success(resources)
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            Result.failure(e)
-        }
-    }
-
     private fun readCalendars(remote: JSONObject = JSONObject(prefs.getString("remote", "{}")!!)): List<CalendarInfo> {
         val array = remote.optJSONArray("calendars") ?: JSONArray()
         return (0 until array.length()).map { i -> array.getJSONObject(i).let {
@@ -266,12 +263,19 @@ class CalendarRepository internal constructor(context: Context, private val crea
     }
 
     companion object {
+        private val naverRefreshing = MutableStateFlow(false)
+        val naverSyncing = naverRefreshing.asStateFlow()
         private val lock = Mutex()
         private val syncLock = Mutex()
         private var remoteRevision = 0L // Guarded by lock; in-flight reads never survive process death.
         private val deviceLock = Mutex()
     }
 }
+
+private data class NaverRefreshInput(
+    val credentials: NaverCredentials, val window: SyncWindow,
+    val events: Map<String, List<DavResource>>, val tasks: Map<String, List<DavResource>>,
+)
 
 private data class NaverCredentials(val server: String, val username: String, val password: String)
 

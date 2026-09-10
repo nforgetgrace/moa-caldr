@@ -1,0 +1,4 @@
+READY: manual sync retains the event; spinner visibility verified.
+PASS: returning to the app shows a spinner during refresh and removes it on completion.
+PASS: repository refresh failure preserves cached events.
+PASS: cached calendars/events and widget updates stay available during a held sync lock; confirmed empty cache removes deleted events.

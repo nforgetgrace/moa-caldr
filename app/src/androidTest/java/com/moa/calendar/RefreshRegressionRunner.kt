@@ -79,9 +79,9 @@ class RefreshRegressionRunner : Instrumentation() {
                         var refresh: AccessibilityNodeInfo? = awaitNode("일정 새로고침")
                         while (refresh != null && !refresh.isClickable) refresh = refresh.parent
                         check(refresh?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
-                        awaitNode("수동 동기화 중")
-                    } else {
-                        check(findNode(currentRoot(), "수동 동기화 중") == null)
+                        awaitNode("동기화 중")
+                    } else if (scenario != "changes") {
+                        awaitNode("동기화 중")
                     }
                     check(findNode(currentRoot(), "RefreshRetentionFixture") != null)
                     if (scenario == "changes") {
@@ -102,7 +102,7 @@ class RefreshRegressionRunner : Instrumentation() {
                         publish(null)
                         awaitAbsent("ChangeAfter")
                         check(findNode(currentRoot(), "RefreshRetentionFixture") != null)
-                        check(findNode(currentRoot(), "수동 동기화 중") == null)
+                        check(findNode(currentRoot(), "동기화 중") == null)
                         sendStatus(1, Bundle().apply { putString("stream", "PASS: committed additions, edits and deletions update the open calendar without removing the unchanged event or showing a spinner.\n") })
                     }
                     sendStatus(1, Bundle().apply { putString("stream", "READY: $scenario sync retains the event; spinner visibility verified.\n") })
@@ -110,6 +110,7 @@ class RefreshRegressionRunner : Instrumentation() {
                 }
                 mutex.unlock(owner)
                 acquired = false
+                if (scenario != null) awaitAbsent("동기화 중")
                 if (scenario == "widget") {
                     // A second date click must reach the same recent activity and change selection.
                     goHome()
@@ -125,9 +126,10 @@ class RefreshRegressionRunner : Instrumentation() {
                     clickWidgetDate(today)
                     awaitNode("나의 캘린더")
                     awaitNode("RefreshRetentionFixture")
-                    check(findNode(currentRoot(), "수동 동기화 중") == null)
+                    awaitNode("동기화 중")
                     mutex.unlock(owner)
                     acquired = false
+                    awaitAbsent("동기화 중")
                     sendStatus(1, Bundle().apply { putString("stream", "PASS: real home-widget date clicks reuse the recent activity, change the selected date and retain cache after closing/reopening during sync.\n") })
                 }
                 if (scenario == "manual") {
@@ -139,10 +141,11 @@ class RefreshRegressionRunner : Instrumentation() {
                     targetContext.startActivity(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     awaitNode("RefreshRetentionFixture")
                     SystemClock.sleep(500)
-                    check(findNode(currentRoot(), "수동 동기화 중") == null)
+                    awaitNode("동기화 중")
                     mutex.unlock(owner)
                     acquired = false
-                    sendStatus(1, Bundle().apply { putString("stream", "PASS: returning to the app after manual refresh starts a silent refresh.\n") })
+                    awaitAbsent("동기화 중")
+                    sendStatus(1, Bundle().apply { putString("stream", "PASS: returning to the app shows a spinner during refresh and removes it on completion.\n") })
                 }
                 // Exercise repository error handling without any real account or network credentials.
                 val vault = targetContext.getSharedPreferences("moa_vault", 0)

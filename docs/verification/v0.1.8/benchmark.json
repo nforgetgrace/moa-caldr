@@ -1,0 +1,21 @@
+{
+  "fixture": "3 calendars; 180 events + 60 tasks; 100ms body delay per response; 32KiB/20ms body throttle; discovery excluded",
+  "sequential": {
+    "body_bytes": 509034,
+    "elapsed_ms": 1007,
+    "requests": 6,
+    "calendar_bodies": 240
+  },
+  "parallel_initial": {
+    "body_bytes": 509034,
+    "elapsed_ms": 322,
+    "requests": 6,
+    "calendar_bodies": 240
+  },
+  "unchanged_refresh": {
+    "body_bytes": 40242,
+    "elapsed_ms": 224,
+    "requests": 6,
+    "calendar_bodies": 0
+  }
+}
