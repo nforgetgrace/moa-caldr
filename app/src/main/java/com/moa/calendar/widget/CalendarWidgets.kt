@@ -24,6 +24,12 @@ import com.moa.calendar.data.CalendarRepository
 import com.moa.calendar.data.CalendarSnapshot
 import com.moa.calendar.data.calendarWeekLayout
 import com.moa.calendar.data.calendarMonthLineCapacity
+import com.moa.calendar.data.WidgetMonthSelection
+import com.moa.calendar.data.parseWidgetMonthSelection
+import com.moa.calendar.data.resolveWidgetMonth
+import com.moa.calendar.data.shiftWidgetMonth
+import com.moa.calendar.data.widgetMonthRange
+import com.moa.calendar.data.widgetMonthTitle
 import kotlin.math.ceil
 import kotlinx.coroutines.*
 import java.time.LocalDate
@@ -38,7 +44,14 @@ open class BaseCalendarWidget : AppWidgetProvider() {
     override fun onEnabled(context: Context) { CalendarSyncJob.schedule(context); updateAsync(context) }
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == REFRESH) { CalendarSyncJob.scheduleNow(context); updateAsync(context) }
+        when (intent.action) {
+            REFRESH -> { CalendarSyncJob.scheduleNow(context); updateAsync(context) }
+            PREVIOUS_MONTH, NEXT_MONTH, CURRENT_MONTH -> {
+                val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+                if (id != AppWidgetManager.INVALID_APPWIDGET_ID) WidgetUpdater.navigate(context, id, intent.action!!)
+                updateAsync(context)
+            }
+        }
     }
     private fun updateAsync(context: Context) {
         val pending = goAsync()
@@ -48,13 +61,34 @@ open class BaseCalendarWidget : AppWidgetProvider() {
             finally { pending.finish() }
         }
     }
-    companion object { const val REFRESH = "com.moa.calendar.REFRESH_WIDGET" }
+    companion object {
+        const val REFRESH = "com.moa.calendar.REFRESH_WIDGET"
+        const val PREVIOUS_MONTH = "com.moa.calendar.WIDGET_PREVIOUS_MONTH"
+        const val NEXT_MONTH = "com.moa.calendar.WIDGET_NEXT_MONTH"
+        const val CURRENT_MONTH = "com.moa.calendar.WIDGET_CURRENT_MONTH"
+    }
 }
 
 class MonthWidget : BaseCalendarWidget()
 class AgendaWidget : BaseCalendarWidget()
 
 object WidgetUpdater {
+    /** Month chosen inside a month widget; expires after midnight (see [resolveWidgetMonth]). */
+    fun monthSelection(context: Context, widgetId: Int): WidgetMonthSelection? =
+        parseWidgetMonthSelection(context.getSharedPreferences("moa_calendar", 0).getString(monthKey(widgetId), null))
+
+    fun navigate(context: Context, widgetId: Int, action: String) {
+        val prefs = context.getSharedPreferences("moa_calendar", 0)
+        val today = LocalDate.now()
+        when (action) {
+            BaseCalendarWidget.PREVIOUS_MONTH -> prefs.edit().putString(monthKey(widgetId), shiftWidgetMonth(monthSelection(context, widgetId), today, -1).encode()).apply()
+            BaseCalendarWidget.NEXT_MONTH -> prefs.edit().putString(monthKey(widgetId), shiftWidgetMonth(monthSelection(context, widgetId), today, 1).encode()).apply()
+            BaseCalendarWidget.CURRENT_MONTH -> prefs.edit().remove(monthKey(widgetId)).apply()
+        }
+    }
+
+    private fun monthKey(widgetId: Int) = "widget_month_$widgetId"
+
     suspend fun update(context: Context) {
         val manager = AppWidgetManager.getInstance(context)
         val monthIds = manager.getAppWidgetIds(ComponentName(context, MonthWidget::class.java))
@@ -63,16 +97,25 @@ object WidgetUpdater {
         val today = LocalDate.now()
         val zone = ZoneId.systemDefault()
         val repository = CalendarRepository(context)
-        val snapshot = repository.load(today.withDayOfMonth(1).minusDays(7).atStartOfDay(zone).toInstant().toEpochMilli(),
-            today.plusMonths(2).atStartOfDay(zone).toInstant().toEpochMilli(), false)
+        val months = monthIds.associateWith { resolveWidgetMonth(monthSelection(context, it), today) }
+        val grids = months.values.distinct().map { widgetMonthRange(it) }
+        // Cover today's agenda window plus every month grid currently shown by a widget.
+        val from = (grids.map { it.first } + today.withDayOfMonth(1).minusDays(7)).min()
+        val to = (grids.map { it.second } + today.plusMonths(2)).max()
+        val snapshot = repository.load(from.atStartOfDay(zone).toInstant().toEpochMilli(), to.atStartOfDay(zone).toInstant().toEpochMilli(), false)
         val visible = snapshot.copy(events = snapshot.events.filter { it.calendarId !in repository.hiddenCalendars() })
-        monthIds.forEach { manager.updateAppWidget(it, month(context, visible, today, it, manager.getAppWidgetOptions(it))) }
+        monthIds.forEach { manager.updateAppWidget(it, month(context, visible, today, months.getValue(it), it, manager.getAppWidgetOptions(it))) }
         agendaIds.forEach { manager.updateAppWidget(it, agenda(context, visible, today, it, manager.getAppWidgetOptions(it))) }
     }
 
-    private fun month(context: Context, snapshot: CalendarSnapshot, today: LocalDate, widgetId: Int, options: Bundle): RemoteViews {
+    private fun month(context: Context, snapshot: CalendarSnapshot, today: LocalDate, month: YearMonth, widgetId: Int, options: Bundle): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_month)
-        views.setTextViewText(R.id.widget_title, "${today.monthValue}월")
+        val currentMonth = month == YearMonth.from(today)
+        views.setTextViewText(R.id.widget_title, widgetMonthTitle(month))
+        views.setContentDescription(R.id.widget_title, if (currentMonth) widgetMonthTitle(month) else context.getString(R.string.go_current_month))
+        views.setOnClickPendingIntent(R.id.widget_prev, navigation(context, widgetId, BaseCalendarWidget.PREVIOUS_MONTH))
+        views.setOnClickPendingIntent(R.id.widget_next, navigation(context, widgetId, BaseCalendarWidget.NEXT_MONTH))
+        views.setOnClickPendingIntent(R.id.widget_title, if (currentMonth) open(context, today) else navigation(context, widgetId, BaseCalendarWidget.CURRENT_MONTH))
         views.setTextViewText(R.id.widget_status, status(snapshot))
         views.removeAllViews(R.id.widget_days)
         val headings = RemoteViews(context.packageName, R.layout.widget_week_header)
@@ -83,7 +126,6 @@ object WidgetUpdater {
             headings.addView(R.id.widget_week_row, cell)
         }
         views.addView(R.id.widget_days, headings)
-        val month = YearMonth.from(today)
         val first = month.atDay(1)
         val offset = first.dayOfWeek.value % 7
         val start = first.minusDays(offset.toLong())
@@ -121,7 +163,7 @@ object WidgetUpdater {
                 cell.setTextViewText(R.id.widget_day_text, "${date.dayOfMonth}" + if (capacity == 0 && count > 0) "·" else "")
                 cell.setTextColor(R.id.widget_day_text, when {
                     date == today -> Color.WHITE
-                    date.month != today.month -> Color.rgb(160, 167, 182)
+                    YearMonth.from(date) != month -> Color.rgb(160, 167, 182)
                     column == 0 -> Color.rgb(206, 120, 120)
                     column == 6 -> Color.rgb(105, 138, 192)
                     else -> Color.rgb(36, 42, 61)
@@ -195,6 +237,10 @@ object WidgetUpdater {
 
     private fun open(context: Context, date: LocalDate): PendingIntent = PendingIntent.getActivity(context, date.toEpochDay().toInt(),
         Intent(context, MainActivity::class.java).putExtra("date", date.toString()).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    private fun navigation(context: Context, id: Int, action: String): PendingIntent = PendingIntent.getBroadcast(context, id,
+        Intent(context, MonthWidget::class.java).setAction(action).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun actions(context: Context, views: RemoteViews, today: LocalDate, receiver: Class<*>, id: Int) {

@@ -195,7 +195,7 @@ class CalDavClient(
     ): Pair<String, String> {
         val builder = Request.Builder().url(url).method(method, body?.toRequestBody(type.toMediaType()))
             .header("Authorization", Credentials.basic(username, password, Charsets.UTF_8))
-            .header("User-Agent", "MoaCalendar/0.1.10 (Android; CalDAV)")
+            .header("User-Agent", "MoaCalendar/0.1.11 (Android; CalDAV)")
         headers.forEach { (key, value) -> builder.header(key, value) }
         val began = System.nanoTime()
         http.newCall(builder.build()).execute().use { response ->

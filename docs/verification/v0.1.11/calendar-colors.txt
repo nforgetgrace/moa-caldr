@@ -1,0 +1,1 @@
+PASS: Calendar color overrides persist across activity/repository restart, recolor events/tasks, update the home widget, and reset to defaults through the real settings UI.

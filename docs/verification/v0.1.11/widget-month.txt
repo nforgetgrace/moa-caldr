@@ -1,0 +1,1 @@
+PASS: Month widget arrows move to previous/next months with their events, the title returns to the current month, selections expire after the date changes, and the current-month title still opens the app.

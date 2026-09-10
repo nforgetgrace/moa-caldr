@@ -149,3 +149,10 @@
 - Store recurrence in Google Calendar Provider and CalDAV source data; keep local wall time across daylight-saving transitions. Monthly dates missing from a month and yearly leap-day dates follow calendar recurrence semantics and explain skipped dates.
 - Per-calendar color choices override the source defaults locally, keyed by source, account and calendar identity. Apply the choice consistently to calendars, events, tasks and both widgets, persist across sync/restart, and offer a default-color reset. Source defaults remain Naver lavender and Google green. Color changes are local preferences and do not start network synchronization.
 - Validate on an isolated emulator only; the Galaxy was released after v0.1.9 installation.
+
+## Month widget navigation · v0.1.11
+- The month widget header reads `‹ 9월 ›`. The arrows move one month back or forward, up to twelve months each way. The title never shows the year in any month. Outside the current month tapping the title returns to the current month (its accessibility label says so); on the current month the title keeps opening the app on today.
+- The chosen month is stored per widget instance with the calendar day it was chosen on. It only applies on that same day, so every widget returns to the current month after midnight, on the date-change broadcast or the next periodic update, without a dedicated alarm.
+- Rendering uses the displayed month for the grid, muted adjacent-month days and the month-only title; today's highlight appears only when today is inside the grid. The footer count, date taps, refresh, agenda widget, colors and silent refresh are unchanged.
+- The widget query window covers today's agenda range plus every displayed month grid. Months the app has never fetched from Naver show only what the shared cache holds.
+- Validate arrows, title reset, per-widget storage and midnight expiry with unit tests and an isolated-emulator regression against the real home-screen widget.
