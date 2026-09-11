@@ -27,6 +27,7 @@ class RefreshRegressionRunner : Instrumentation() {
 
     override fun onStart() {
         if (scenario == "widget_month") { WidgetMonthRegression(this).run(); return }
+        if (scenario == "widget_refresh") { WidgetRefreshRegression(this).run(); return }
         if (scenario == "calendar_colors") { CalendarColorRegression(this).run(); return }
         if (scenario == "recurrence_provider") { ProviderRecurrenceRegression(this).run(); return }
         if (scenario == "recurrence_editor") { RecurrenceEditorRegression(this).run(); return }

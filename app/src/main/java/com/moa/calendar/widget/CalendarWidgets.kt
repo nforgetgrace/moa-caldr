@@ -30,6 +30,8 @@ import com.moa.calendar.data.resolveWidgetMonth
 import com.moa.calendar.data.shiftWidgetMonth
 import com.moa.calendar.data.widgetMonthRange
 import com.moa.calendar.data.widgetMonthTitle
+import com.moa.calendar.data.widgetRefreshInProgress
+import com.moa.calendar.data.widgetStatusText
 import kotlin.math.ceil
 import kotlinx.coroutines.*
 import java.time.LocalDate
@@ -45,7 +47,7 @@ open class BaseCalendarWidget : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         when (intent.action) {
-            REFRESH -> { CalendarSyncJob.scheduleNow(context); updateAsync(context) }
+            REFRESH -> { WidgetUpdater.beginRefresh(context); CalendarSyncJob.scheduleNow(context) }
             PREVIOUS_MONTH, NEXT_MONTH, CURRENT_MONTH -> {
                 val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
                 if (id != AppWidgetManager.INVALID_APPWIDGET_ID) WidgetUpdater.navigate(context, id, intent.action!!)
@@ -89,6 +91,31 @@ object WidgetUpdater {
 
     private fun monthKey(widgetId: Int) = "widget_month_$widgetId"
 
+    /** Show the spinner right away on every widget; the sync job clears it through [finishRefresh]. */
+    fun beginRefresh(context: Context) {
+        context.getSharedPreferences("moa_calendar", 0).edit().putLong(REFRESH_STARTED, System.currentTimeMillis()).apply()
+        val manager = AppWidgetManager.getInstance(context)
+        listOf(MonthWidget::class.java to R.layout.widget_month, AgendaWidget::class.java to R.layout.widget_agenda).forEach { (widget, layout) ->
+            manager.getAppWidgetIds(ComponentName(context, widget)).forEach { id ->
+                val views = RemoteViews(context.packageName, layout)
+                views.setViewVisibility(R.id.widget_refresh, android.view.View.GONE)
+                views.setViewVisibility(R.id.widget_progress, android.view.View.VISIBLE)
+                views.setTextViewText(R.id.widget_status, widgetStatusText(true, false, true, 0, ZoneId.systemDefault()))
+                manager.partiallyUpdateAppWidget(id, views)
+            }
+        }
+    }
+
+    /** Record the outcome of a sync job so the next render hides the spinner and shows when data was last confirmed. */
+    fun finishRefresh(context: Context, success: Boolean) {
+        val editor = context.getSharedPreferences("moa_calendar", 0).edit().remove(REFRESH_STARTED)
+        if (success) editor.putLong(LAST_SYNC, System.currentTimeMillis())
+        editor.apply()
+    }
+
+    private const val REFRESH_STARTED = "widget_refresh_started"
+    private const val LAST_SYNC = "widget_last_sync"
+
     suspend fun update(context: Context) {
         val manager = AppWidgetManager.getInstance(context)
         val monthIds = manager.getAppWidgetIds(ComponentName(context, MonthWidget::class.java))
@@ -97,6 +124,8 @@ object WidgetUpdater {
         val today = LocalDate.now()
         val zone = ZoneId.systemDefault()
         val repository = CalendarRepository(context)
+        val prefs = context.getSharedPreferences("moa_calendar", 0)
+        val refreshing = widgetRefreshInProgress(prefs.getLong(REFRESH_STARTED, 0), System.currentTimeMillis())
         val months = monthIds.associateWith { resolveWidgetMonth(monthSelection(context, it), today) }
         val grids = months.values.distinct().map { widgetMonthRange(it) }
         // Cover today's agenda window plus every month grid currently shown by a widget.
@@ -104,19 +133,27 @@ object WidgetUpdater {
         val to = (grids.map { it.second } + today.plusMonths(2)).max()
         val snapshot = repository.load(from.atStartOfDay(zone).toInstant().toEpochMilli(), to.atStartOfDay(zone).toInstant().toEpochMilli(), false)
         val visible = snapshot.copy(events = snapshot.events.filter { it.calendarId !in repository.hiddenCalendars() })
-        monthIds.forEach { manager.updateAppWidget(it, month(context, visible, today, months.getValue(it), it, manager.getAppWidgetOptions(it))) }
-        agendaIds.forEach { manager.updateAppWidget(it, agenda(context, visible, today, it, manager.getAppWidgetOptions(it))) }
+        val status = widgetStatusText(refreshing, snapshot.errors.isNotEmpty(), snapshot.calendars.isNotEmpty(),
+            maxOf(prefs.getLong(LAST_SYNC, 0), snapshot.lastSyncMillis), zone)
+        monthIds.forEach { manager.updateAppWidget(it, month(context, visible, today, months.getValue(it), it, manager.getAppWidgetOptions(it), status, refreshing)) }
+        agendaIds.forEach { manager.updateAppWidget(it, agenda(context, visible, today, it, manager.getAppWidgetOptions(it), status, refreshing)) }
     }
 
-    private fun month(context: Context, snapshot: CalendarSnapshot, today: LocalDate, month: YearMonth, widgetId: Int, options: Bundle): RemoteViews {
+    private fun spinner(views: RemoteViews, refreshing: Boolean) {
+        views.setViewVisibility(R.id.widget_refresh, if (refreshing) android.view.View.GONE else android.view.View.VISIBLE)
+        views.setViewVisibility(R.id.widget_progress, if (refreshing) android.view.View.VISIBLE else android.view.View.GONE)
+    }
+
+    private fun month(context: Context, snapshot: CalendarSnapshot, today: LocalDate, month: YearMonth, widgetId: Int, options: Bundle, status: String, refreshing: Boolean): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_month)
+        spinner(views, refreshing)
         val currentMonth = month == YearMonth.from(today)
         views.setTextViewText(R.id.widget_title, widgetMonthTitle(month))
         views.setContentDescription(R.id.widget_title, if (currentMonth) widgetMonthTitle(month) else context.getString(R.string.go_current_month))
         views.setOnClickPendingIntent(R.id.widget_prev, navigation(context, widgetId, BaseCalendarWidget.PREVIOUS_MONTH))
         views.setOnClickPendingIntent(R.id.widget_next, navigation(context, widgetId, BaseCalendarWidget.NEXT_MONTH))
         views.setOnClickPendingIntent(R.id.widget_title, if (currentMonth) open(context, today) else navigation(context, widgetId, BaseCalendarWidget.CURRENT_MONTH))
-        views.setTextViewText(R.id.widget_status, status(snapshot))
+        views.setTextViewText(R.id.widget_status, status)
         views.removeAllViews(R.id.widget_days)
         val headings = RemoteViews(context.packageName, R.layout.widget_week_header)
         listOf("일", "월", "화", "수", "목", "금", "토").forEach { heading ->
@@ -204,10 +241,11 @@ object WidgetUpdater {
         return views
     }
 
-    private fun agenda(context: Context, snapshot: CalendarSnapshot, today: LocalDate, widgetId: Int, options: Bundle): RemoteViews {
+    private fun agenda(context: Context, snapshot: CalendarSnapshot, today: LocalDate, widgetId: Int, options: Bundle, status: String, refreshing: Boolean): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_agenda)
+        spinner(views, refreshing)
         views.setTextViewText(R.id.widget_title, "${today.monthValue}월 ${today.dayOfMonth}일")
-        views.setTextViewText(R.id.widget_status, status(snapshot))
+        views.setTextViewText(R.id.widget_status, status)
         views.removeAllViews(R.id.widget_events)
         val heightKey = if (context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
             AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT else AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT
@@ -226,13 +264,6 @@ object WidgetUpdater {
         views.setTextViewText(R.id.widget_footer, if (events.isEmpty()) "다가오는 일정이 없어요 · 앱 열기  →" else "모든 일정 보기  →")
         actions(context, views, today, AgendaWidget::class.java, widgetId)
         return views
-    }
-
-    private fun status(snapshot: CalendarSnapshot): String = when {
-        snapshot.errors.isNotEmpty() -> "갱신 확인 필요 · 저장된 일정"
-        snapshot.calendars.isEmpty() -> "앱에서 캘린더를 연결해 주세요"
-        snapshot.lastSyncMillis > 0 -> "네이버 확인 " + Instant.ofEpochMilli(snapshot.lastSyncMillis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M/d HH:mm"))
-        else -> "기기에 저장된 일정"
     }
 
     private fun open(context: Context, date: LocalDate): PendingIntent = PendingIntent.getActivity(context, date.toEpochDay().toInt(),
@@ -268,8 +299,15 @@ class CalendarSyncJob : JobService() {
                 val to = params.extras.getLong("to", now.plusMonths(3).atStartOfDay(zone).toInstant().toEpochMilli())
                 val result = repository.load(from, to, initialOnly = params.jobId == INITIAL_JOB)
                 retry = if (params.jobId == INITIAL_JOB) repository.initialNaverSyncPending() else result.errors.isNotEmpty()
+                WidgetUpdater.finishRefresh(applicationContext, success = !retry)
                 WidgetUpdater.update(applicationContext)
-            } catch (e: Exception) { if (e is CancellationException) throw e; retry = true }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                retry = true
+                // Hide a widget-triggered spinner even when the sync itself failed; the status line keeps the last good sync time.
+                WidgetUpdater.finishRefresh(applicationContext, success = false)
+                try { WidgetUpdater.update(applicationContext) } catch (_: Exception) { }
+            }
             finally { withContext(NonCancellable + Dispatchers.Main) {
                 jobs.remove(params.jobId)
                 if (params.jobId == CONTENT_JOB) {

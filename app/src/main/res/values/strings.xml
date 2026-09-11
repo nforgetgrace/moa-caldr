@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">모아 캘린더</string>
     <string name="brand">moa</string>
+    <string name="widget_brand">Gook\'s</string>
     <string name="upcoming">다가오는 일정</string>
     <string name="refresh_symbol">↻</string>
     <string name="refresh_events">일정 새로고침</string>
@@ -9,6 +10,7 @@
     <string name="previous_month">이전 달</string>
     <string name="next_month">다음 달</string>
     <string name="go_current_month">이번 달로 이동</string>
+    <string name="syncing">동기화 중</string>
     <string name="open_app_events">앱에서 일정을 확인해 주세요</string>
     <string name="connect_calendars">앱에서 캘린더를 연결해 주세요</string>
     <string name="all_events">모든 일정 보기 →</string>

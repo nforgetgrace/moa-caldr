@@ -3,6 +3,7 @@
         <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/brand" android:textSize="22sp" android:textStyle="bold" android:textColor="#FFFFFF" />
         <TextView android:id="@+id/widget_title" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/upcoming" android:textSize="12sp" android:textColor="#CED5E8" />
         <TextView android:id="@+id/widget_refresh" android:layout_width="38dp" android:layout_height="38dp" android:gravity="center" android:text="@string/refresh_symbol" android:textSize="23sp" android:textColor="#CED5E8" android:contentDescription="@string/refresh_events" />
+        <ProgressBar android:id="@+id/widget_progress" style="?android:attr/progressBarStyleSmall" android:layout_width="38dp" android:layout_height="38dp" android:padding="9dp" android:indeterminate="true" android:indeterminateTint="#CED5E8" android:visibility="gone" android:contentDescription="@string/syncing" />
     </LinearLayout>
     <TextView android:id="@+id/widget_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:text="@string/open_app_events" android:textSize="11sp" android:textColor="#BCC5DF" />
     <LinearLayout android:id="@+id/widget_events" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical" />

@@ -156,3 +156,9 @@
 - Rendering uses the displayed month for the grid, muted adjacent-month days and the month-only title; today's highlight appears only when today is inside the grid. The footer count, date taps, refresh, agenda widget, colors and silent refresh are unchanged.
 - The widget query window covers today's agenda range plus every displayed month grid. Months the app has never fetched from Naver show only what the shared cache holds.
 - Validate arrows, title reset, per-widget storage and midnight expiry with unit tests and an isolated-emulator regression against the real home-screen widget.
+
+## Widget header, refresh feedback and last sync time · v0.1.12
+- The month widget header centers `‹ 9월 ›`; a small `Gook's` mark sits to the right beside the refresh button, mirrored by an empty left slot so the month stays centered. The brand string `moa` remains in the app and the agenda widget.
+- Pressing refresh on either widget swaps the refresh icon for an indeterminate spinner immediately and sets the status line to 동기화 중…, before any data is loaded. The immediate sync job clears the spinner when it finishes, whether it succeeded or failed, and a refresh that never reports back expires after 90 seconds on the next render.
+- The status line shows the most recent confirmed sync as `최근 동기화 M/d HH:mm`, taken from the later of the last successful sync job and the last Naver server check. Sync errors keep that time after the error notice; missing calendars and never-synced caches keep their existing messages.
+- Only the two widget layouts, the widget updater and the sync job change; the app's own spinner, refresh scheduling and cache behavior are untouched.

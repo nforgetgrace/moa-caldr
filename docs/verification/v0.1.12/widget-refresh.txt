@@ -1,0 +1,1 @@
+PASS: Widget refresh shows a spinner immediately, the sync job clears it and records the last sync date/time in the status line, and a stale refresh flag expires.
